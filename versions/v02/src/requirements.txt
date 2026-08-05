@@ -1,0 +1,14 @@
+# Runtime dependencies for ra226_gui.py
+# Tested with Python 3.9 – 3.13.  Install:
+#   python -m pip install -r requirements.txt
+#
+# tkinter is part of the CPython standard library; on Debian/Ubuntu it
+# ships separately:  sudo apt-get install python3-tk
+
+numpy>=1.24
+scipy>=1.10
+matplotlib>=3.7
+pillow>=10.0
+
+# Build-only — needed for build.sh / build.bat, not for runtime
+pyinstaller>=6.0

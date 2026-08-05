@@ -1,0 +1,22 @@
+# Compiled binaries — use GitHub Releases for distributing these
+dist/WinExe/
+dist/WinInstaller/
+
+# PyInstaller build cache
+build/
+
+# Auto-generated result files from calibration runs
+*_Res.txt
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Claude Code session data
+.remember/
+.claude/
+
+# OS
+Thumbs.db
+.DS_Store
