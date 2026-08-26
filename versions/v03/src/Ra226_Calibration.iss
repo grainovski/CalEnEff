@@ -5,7 +5,7 @@
 #define AppName    "CalEnEff"
 #define AppVersion "3.0"
 #define AppExe     "CalEnEff.exe"
-#define AppDir     "dist\CalEnEff"
+#define AppDir     "dist\WinExe\CalEnEff"
 
 [Setup]
 AppId={{03EF4FFE-CEFE-49CF-B421-1B94DAC9CB54}

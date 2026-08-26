@@ -852,6 +852,8 @@ class App(tk.Tk):
             except Exception:
                 pass
 
+        self.bind("<F1>", lambda e: self._open_howto())
+
         self.engine      = CalibrationEngine()
         self._q_arts     = []   # energy query artists on ax_m/ax_r1/ax_r2
         self._eff_q_arts = []   # efficiency query artists on ax_eff
@@ -865,6 +867,32 @@ class App(tk.Tk):
 
         if os.path.isfile(DEFAULT_FILE):
             self.after(100, lambda: self._do_load(DEFAULT_FILE))
+
+    # ── Help button popup ──────────────────────────────────────────────
+    def _show_help_popup(self):
+        m = tk.Menu(self, tearoff=0)
+        m.add_command(label="HowTo (F1)",         command=self._open_howto)
+        m.add_command(label="Knowledge Database", command=self._open_knowledge_db)
+        m.add_separator()
+        m.add_command(label="About",              command=self._open_about)
+        x = self._help_btn.winfo_rootx()
+        y = self._help_btn.winfo_rooty() + self._help_btn.winfo_height()
+        try:
+            m.tk_popup(x, y)
+        finally:
+            m.grab_release()
+
+    def _open_howto(self):
+        from help_content import build_howto_html, open_help_page
+        open_help_page(build_howto_html())
+
+    def _open_knowledge_db(self):
+        from help_content import build_knowledge_database_html, open_help_page
+        open_help_page(build_knowledge_database_html())
+
+    def _open_about(self):
+        from help_content import build_about_html, open_help_page
+        open_help_page(build_about_html())
 
     # ── ttk style ─────────────────────────────────────────────────────
     def _apply_ttk_style(self, name):
@@ -895,6 +923,14 @@ class App(tk.Tk):
                  text="Energy & Efficiency Calibration  —  Monte Carlo Fit",
                  font=("Segoe UI", 15, "bold"),
                  bg=self.DARK, fg=self.ACCENT).pack(side="left")
+        self._help_btn = tk.Button(
+            top, text="Help ▾",
+            font=("Segoe UI", 9),
+            bg=self.BORDER, fg=self.TEXT,
+            activebackground=self.MUTED, activeforeground=self.DARK,
+            relief="flat", bd=0, padx=8, pady=4,
+            cursor="hand2", command=self._show_help_popup)
+        self._help_btn.pack(side="right", padx=(4, 0))
         self._theme_btn = tk.Button(
             top, text="☀  Light",
             font=("Segoe UI", 9),

@@ -20,3 +20,6 @@ __pycache__/
 # OS
 Thumbs.db
 .DS_Store
+
+dist/CalEnEff/
+build_info.py

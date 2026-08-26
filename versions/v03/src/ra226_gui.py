@@ -71,6 +71,14 @@ def _resource_dir():
 
 DEFAULT_FILE = os.path.join(_resource_dir(), "226Ra_En_Area.txt")   # auto-load if present
 
+def _write_and_open(html):
+    """Write an HTML string to a temp file and open it in the system browser."""
+    import tempfile
+    f = tempfile.NamedTemporaryFile(mode='w', suffix='.html', delete=False, encoding='utf-8')
+    f.write(html)
+    f.close()
+    webbrowser.open('file:///' + f.name.replace('\\', '/'))
+
 # ── Theme palettes ──────────────────────────────────────────────────────────────
 _DARK = {
     'DARK':   "#1e1e2e", 'PANEL':  "#2a2a3e",
@@ -852,6 +860,8 @@ class App(tk.Tk):
             except Exception:
                 pass
 
+        self._build_menu()
+
         self.engine      = CalibrationEngine()
         self._q_arts     = []   # energy query artists on ax_m/ax_r1/ax_r2
         self._eff_q_arts = []   # efficiency query artists on ax_eff
@@ -865,6 +875,25 @@ class App(tk.Tk):
 
         if os.path.isfile(DEFAULT_FILE):
             self.after(100, lambda: self._do_load(DEFAULT_FILE))
+
+    # ── Help menu ─────────────────────────────────────────────────────
+    def _build_menu(self):
+        menubar = tk.Menu(self)
+        help_menu = tk.Menu(menubar, tearoff=0)
+        help_menu.add_command(label="HowTo (F1)", command=self._open_howto)
+        help_menu.add_separator()
+        help_menu.add_command(label="About", command=self._open_about)
+        menubar.add_cascade(label="Help", menu=help_menu)
+        self.config(menu=menubar)
+        self.bind("<F1>", lambda e: self._open_howto())
+
+    def _open_howto(self):
+        from help_content import build_howto_html
+        _write_and_open(build_howto_html())
+
+    def _open_about(self):
+        from help_content import build_about_html
+        _write_and_open(build_about_html())
 
     # ── ttk style ─────────────────────────────────────────────────────
     def _apply_ttk_style(self, name):

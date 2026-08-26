@@ -50,7 +50,8 @@ a = Analysis(
         ("demo1.txt", "."),
         ("demo2.txt", "."),
         ("CalEnEff.ico", "."),
-    ],
+        ("help_content.py", "."),
+    ] + ([("build_info.py", ".")] if os.path.exists("build_info.py") else []),
     hiddenimports=[
         "scipy.special._ufuncs",
         "scipy.optimize",
