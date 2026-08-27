@@ -1,4 +1,4 @@
-# Ra-226 Energy & Efficiency Calibration GUI
+# CalEnEff — Energy & Efficiency Calibration GUI
 
 Interactive Tk/matplotlib tool that turns raw channel/peak data into
 
@@ -35,44 +35,65 @@ executable.  Two extra sample sets, `demo1.txt` (Ba-133, 9 peaks) and
 
 ## Distributions
 
-Three turn-key packages live under `dist/`:
+Released binaries are published on the
+[Releases page](https://github.com/grainovski/CalEnEff/releases) — they are
+not kept in the repository.
 
-| Distribution    | What you get                                         | When to use                            |
-|-----------------|------------------------------------------------------|----------------------------------------|
-| `dist/WinExe/`  | Pre-built `Ra226_Calibration.exe` (≈ 200 MB)         | Windows users with no Python install  |
-| `dist/WinBat/`  | Python source + `run.bat` / `build.bat`              | Windows users with Python              |
-| `dist/Linux/`   | Python source + `run.sh` / `build.sh`                | Linux, macOS, WSL                      |
+| Package                          | Platform                | Built by                        |
+|----------------------------------|-------------------------|---------------------------------|
+| `CalEnEff_Setup.exe`             | Windows 10/11 (x64)     | `build.ps1` (PyInstaller + Inno Setup 6) |
+| `caleneff_<ver>_all.deb`         | Ubuntu / Debian         | `packaging/linux/build_deb.sh`  |
+| `caleneff-<ver>-1.el10.noarch.rpm` | AlmaLinux / RHEL 10   | `packaging/linux/build_rpm.sh`  |
 
-Each folder ships its own `README_install.md` with platform-specific
-prerequisites, install commands, and troubleshooting tips.
+The Windows installer bundles its own Python runtime — nothing else to
+install.  The Linux packages depend on the distribution's `python3-numpy`,
+`python3-scipy`, `python3-matplotlib` and `python3-tk`.
 
 ---
 
 ## Quick start
 
-### Windows binary
+### Windows (installer)
 
-```text
-cd dist\WinExe
-Ra226_Calibration.exe
-```
+Run `CalEnEff_Setup.exe` and launch **CalEnEff** from the Start menu.
 
-### Windows source
-
-```bat
-cd dist\WinBat
-python -m pip install -r requirements.txt
-run.bat
-```
-
-### Linux / macOS
+### Linux
 
 ```bash
-cd dist/Linux
-python3 -m pip install --user -r requirements.txt
-chmod +x run.sh
-./run.sh
+sudo apt install ./caleneff_4.0_all.deb      # Ubuntu / Debian
+sudo dnf install ./caleneff-4.0-1.el10.noarch.rpm   # AlmaLinux / RHEL
+caleneff
 ```
+
+### From source (any platform)
+
+```bash
+python -m pip install -r requirements.txt
+python ra226_gui.py
+```
+
+On Windows `run.bat` does the same with a dependency pre-check.
+
+---
+
+## Building
+
+The version string in `Ra226_Calibration.iss` (`#define AppVersion`) is the
+single source of truth — `build.ps1` and both Linux scripts read it, so a
+release bump touches exactly one file.
+
+```powershell
+powershell -File build.ps1        # Windows installer → dist\WinInstaller\
+```
+
+```bash
+# Linux packages — each runs as root inside its own WSL distro
+wsl -d Ubuntu-24.04  -u root bash packaging/linux/build_deb.sh
+wsl -d AlmaLinux-10  -u root bash packaging/linux/build_rpm.sh
+```
+
+Build the RPM on **AlmaLinux-10, not 8** — on 8 the `python3-matplotlib`
+package links against a `libqhull.so.7` that is absent from the repos.
 
 ---
 
@@ -98,21 +119,21 @@ calibration and every query.
 
 ## Source layout
 
-| File                       | Purpose                                   |
-|---------------------------|-------------------------------------------|
-| `ra226_gui.py`            | Main application (single file, ≈ 2 200 lines) |
-| `Ra226_Calibration.spec`  | PyInstaller build recipe                  |
-| `Ra226_Calibration.ico`   | Multi-resolution app icon (16…256 px)     |
-| `make_icon.py`            | Regenerate the icon from scratch          |
-| `226Ra_En_Area.txt`       | Sample dataset (23 peaks)                 |
-| `requirements.txt`        | Python runtime + build dependencies       |
-| `run.sh` / `run.bat`      | Source-distribution launchers             |
-| `build.sh` / `build.bat`  | PyInstaller wrappers → `dist/WinExe/` (or `dist/LinuxExe/`) |
-| `dist/WinExe/`            | Pre-built Windows binary                  |
-| `dist/WinBat/`            | Windows-source distribution package       |
-| `dist/Linux/`             | Unix-source distribution package          |
-| `versions/v01/`           | Archive: original 4-param KFR only        |
-| `versions/v02/`           | Archive: this version (KFR + Radword 5-p) |
+| File                        | Purpose                                       |
+|-----------------------------|-----------------------------------------------|
+| `ra226_gui.py`              | Main application — the only file to edit for app changes |
+| `help_content.py`           | HowTo / Knowledge Database / About pages (opened in the browser) |
+| `Ra226_Calibration.spec`    | PyInstaller build recipe                      |
+| `Ra226_Calibration.iss`     | Inno Setup script — **defines the version**   |
+| `build.ps1`                 | Windows build: stamp `build_info.py` → PyInstaller → ISCC |
+| `packaging/linux/`          | DEB and RPM build scripts, spec, desktop entry |
+| `CalEnEff.ico`              | Multi-resolution app icon (16…256 px)         |
+| `make_icon.py`              | Regenerate the icon from scratch              |
+| `226Ra_En_Area.txt`         | Sample dataset (23 Ra-226 peaks)              |
+| `demo1.txt` / `demo2.txt`   | Extra samples (Ba-133, Eu-152)                |
+| `requirements.txt`          | Python runtime + build dependencies           |
+| `run.bat`                   | Source launcher for Windows                   |
+| `versions/v01…v03/`         | Source snapshots of earlier releases          |
 
 ---
 
@@ -132,3 +153,52 @@ calibration and every query.
 * **Birge ratio** `B = √(χ²/ndf)` is reported and used to scale the
   reported 1 σ band when the data scatter exceeds the stated σ
   ([reference](https://arxiv.org/html/2406.08293v3)).
+* **Channel → energy inversion** uses the cancellation-free (Citardauq)
+  form of the quadratic root, so Monte-Carlo samples whose curvature term
+  drifts near zero stay finite instead of diverging.
+
+---
+
+## What's new in 4.0
+
+**Correctness**
+
+* Energy queries are seeded and therefore reproducible — repeating a query
+  now yields identical numbers in the results log.
+* Quadratic channel→energy inversion is numerically stable when the
+  curvature coefficient approaches zero (previously it could return `inf`
+  and poison the reported mean).
+* Input files are validated on load with specific, row-numbered messages
+  instead of failing later inside NumPy or SciPy.
+
+**Stability**
+
+* Mouse-wheel scrolling works on X11 (Linux) and macOS, not just Windows.
+* The window stays responsive during calibration, and the close button is
+  ignored mid-run rather than tearing down widgets under a running fit.
+* A calibration in which Monte-Carlo fits fail now reports how many
+  succeeded instead of presenting a weak result as a strong one.
+* Loading a bad file can no longer leave the status bar describing one file
+  while a different one is loaded.
+
+**Performance**
+
+* Calibration is roughly **5× faster** (~73 s → ~14 s): SciPy raised an
+  `OptimizeWarning` on most Radware Monte-Carlo fits, and Python's warning
+  machinery dominated the loop.
+* Efficiency confidence bands are computed with vectorised NumPy over a
+  capped sample count instead of a 10 000-iteration Python loop.
+
+**Packaging**
+
+* `MIT LICENSE` added (the About page already linked to it).
+* The version is single-sourced from `Ra226_Calibration.iss`; the DEB and
+  RPM scripts read it instead of hardcoding their own.
+* UPX packing disabled — it risked the same DLL corruption as lzma2 and is
+  a common antivirus false positive.
+
+---
+
+## License
+
+MIT — see [LICENSE](LICENSE).

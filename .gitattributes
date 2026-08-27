@@ -1,0 +1,25 @@
+# Line-ending policy.
+#
+# This repository is developed on Windows (core.autocrlf=true) but the Linux
+# packaging scripts are executed by bash inside WSL.  Without the rules below a
+# fresh clone on Windows checks them out with CRLF, and every line then ends in
+# a stray carriage return — bash fails with:
+#     $'\r': command not found
+# which looks like a broken script rather than a line-ending problem.
+
+*.sh        text eol=lf
+*.desktop   text eol=lf
+
+# RPM spec: read by rpmbuild on Linux, and CRLF leaks into %install scriptlets.
+packaging/linux/*.spec text eol=lf
+
+# Windows-native scripts stay CRLF.
+*.bat       text eol=crlf
+*.ps1       text eol=crlf
+
+# Never touch binary payloads.
+*.ico       binary
+*.png       binary
+*.deb       binary
+*.rpm       binary
+*.exe       binary
