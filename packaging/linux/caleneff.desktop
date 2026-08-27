@@ -1,0 +1,11 @@
+[Desktop Entry]
+Name=CalEnEff
+GenericName=Efficiency Calibration
+Comment=Gamma-ray energy and efficiency calibration using Ra-226
+Exec=/usr/bin/caleneff
+Icon=/usr/share/caleneff/caleneff.png
+Terminal=false
+Type=Application
+Categories=Science;Education;
+Keywords=gamma;calibration;efficiency;spectroscopy;HPGe;detector;
+StartupWMClass=CalEnEff

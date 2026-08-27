@@ -23,3 +23,6 @@ Thumbs.db
 
 dist/CalEnEff/
 build_info.py
+
+dist/*.deb
+dist/*.rpm
