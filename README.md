@@ -134,6 +134,43 @@ wsl -d AlmaLinux-10  -u root bash packaging/linux/build_rpm.sh
 Build the RPM on **AlmaLinux-10, not 8** — on 8 the `python3-matplotlib`
 package links against a `libqhull.so.7` that is absent from the repos.
 
+**Never smoke-test the RPM on the machine that built it.** `build_rpm.sh`
+enables EPEL there, so the package always installs; that is how a
+stock-system install defect shipped in both 4.0 and 4.1. Use a throwaway
+instance: `wsl --install AlmaLinux-10 --name AlmaStock --no-launch`.
+
+---
+
+## Tests
+
+```bash
+python verify/verify_v4.py     # 28 checks — engine, headless
+python verify/verify_gui.py    # 24 checks — real Tk widgets, needs a display, ~90 s
+```
+
+Both exit non-zero on failure and locate the repo from their own path, so
+they run unedited from any checkout.
+
+**Count the PASS lines, not the verdict.** Fewer than 28 and 24 means an
+incomplete environment rather than a healthy project — a suite that silently
+collects fewer checks looks identical to success.
+
+Two things worth knowing:
+
+* If your console is not UTF-8, prefix with `PYTHONIOENCODING=utf-8
+  PYTHONUTF8=1`. The scripts print `Δ`, `ε`, `χ²`, and on cp1252 they die
+  partway through with `UnicodeEncodeError`.
+* `verify_gui.py` **overwrites `226Ra_En_Area_Res.txt`** — every calibration
+  rewrites that file from scratch, so any query log in it is lost.
+
+A full calibration takes ~14 s. If it takes ~70 s, the `OptimizeWarning`
+filter near the top of `ra226_gui.py` is missing — one line, worth a 3–5×
+difference.
+
+`build.ps1` exiting 0 does **not** prove the frozen executable runs. Launch it
+after building; this project's historical first-run crash was an MKL/Tk
+interaction invisible when running from source.
+
 ---
 
 ## Workflow
@@ -170,6 +207,7 @@ calibration and every query.
 | `make_icon.py`              | Regenerate the icon from scratch              |
 | `226Ra_En_Area.txt`         | Sample dataset (23 Ra-226 peaks)              |
 | `demo1.txt` / `demo2.txt`   | Extra samples (Ba-133, Eu-152)                |
+| `verify/`                   | Test suite — `verify_v4.py` (engine) and `verify_gui.py` (widgets) |
 | `requirements.txt`          | Python runtime + build dependencies           |
 | `run.bat`                   | Source launcher for Windows                   |
 | `versions/v01…v03/`         | Source snapshots of earlier releases          |

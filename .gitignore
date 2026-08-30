@@ -34,7 +34,3 @@ dist/*.rpm
 # untracked and a single 'git add -A' would have swept ~140 MB of installers
 # into the index.
 /releases/
-
-# The two baseline verification scripts are carried in the migration handoff
-# (project-data.tar.gz), not in the repo.
-/verify/
