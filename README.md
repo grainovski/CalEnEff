@@ -57,7 +57,7 @@ AppStream.  Without EPEL the install stops with:
 
 ```
 Error: Problem: conflicting requests
-  - nothing provides python3-matplotlib needed by caleneff-4.0-1.el10.noarch
+  - nothing provides python3-matplotlib needed by caleneff-4.1-1.el10.noarch
 ```
 
 Ubuntu and Debian need nothing extra; all four are in their default
@@ -75,11 +75,11 @@ Run `CalEnEff_Setup.exe` and launch **CalEnEff** from the Start menu.
 
 ```bash
 # Ubuntu / Debian
-sudo apt install ./caleneff_4.0_all.deb
+sudo apt install ./caleneff_4.1_all.deb
 
 # AlmaLinux / RHEL — enable EPEL first; it is what provides python3-matplotlib
 sudo dnf install -y epel-release
-sudo dnf install ./caleneff-4.0-1.el10.noarch.rpm
+sudo dnf install ./caleneff-4.1-1.el10.noarch.rpm
 
 caleneff
 ```

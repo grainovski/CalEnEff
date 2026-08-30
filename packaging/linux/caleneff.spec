@@ -1,7 +1,7 @@
 # Version is supplied by build_rpm.sh via --define "version X.Y", which reads
 # it from Ra226_Calibration.iss so the whole project has one source of truth.
 # The fallback below only applies when rpmbuild is invoked by hand.
-%{!?version: %define version 4.0}
+%{!?version: %define version 4.1}
 
 Name:           caleneff
 Version:        %{version}
@@ -78,6 +78,13 @@ gtk-update-icon-cache -f -t /usr/share/icons/hicolor 2>/dev/null || true
 update-desktop-database 2>/dev/null || true
 
 %changelog
+* Sun Aug 30 2026 grainovski <grainovski@googlemail.com> - 4.1-1
+- Documentation only; no change to the application.
+- Record that the EPEL repository must be enabled before installing:
+  python3-matplotlib is not in the stock BaseOS, AppStream, CRB or Extras
+  repositories on AlmaLinux/RHEL 10, so without EPEL the install fails with
+  "nothing provides python3-matplotlib".
+
 * Thu Aug 27 2026 grainovski <grainovski@googlemail.com> - 4.0-1
 - Correctness: seeded energy-query MC so repeated queries reproduce; cancellation-free
   quadratic inversion that stays finite as the curvature term approaches zero;

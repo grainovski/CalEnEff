@@ -91,13 +91,21 @@ chmod 755 "$STAGING/usr/bin/caleneff"
 cat > /tmp/changelog <<EOF
 caleneff (${VER}) stable; urgency=low
 
+  * Documentation only; no change to the application.
+  * Record the EPEL prerequisite for the RPM build (does not affect this
+    package: every dependency is in Debian/Ubuntu's default archives).
+
+ -- grainovski <grainovski@googlemail.com>  $(date -R)
+
+caleneff (4.0) stable; urgency=low
+
   * Correctness: seeded energy-query MC (reproducible results); numerically
     stable quadratic inversion; validation of the input data file.
   * Stability: mouse-wheel scrolling now works on X11; window stays responsive
     during calibration; graceful handling of failed Monte Carlo fits.
   * Performance: vectorised efficiency confidence bands (~7x faster redraw).
 
- -- grainovski <grainovski@googlemail.com>  $(date -R)
+ -- grainovski <grainovski@googlemail.com>  Thu, 27 Aug 2026 21:00:00 +0300
 EOF
 gzip -9 -n /tmp/changelog
 install -m 644 /tmp/changelog.gz "$STAGING/usr/share/doc/$PKG/"

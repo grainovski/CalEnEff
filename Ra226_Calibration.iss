@@ -6,7 +6,7 @@
 ; reads it to stamp build_info.py, and the Linux packaging scripts read it to
 ; version the DEB and RPM.  Bump it here and nowhere else.
 #define AppName    "CalEnEff"
-#define AppVersion "4.0"
+#define AppVersion "4.1"
 #define AppExe     "CalEnEff.exe"
 #define AppDir     "dist\CalEnEff"
 
