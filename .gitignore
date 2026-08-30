@@ -26,3 +26,15 @@ build_info.py
 
 dist/*.deb
 dist/*.rpm
+
+# Local archive of built installers, kept outside git deliberately — the
+# published copies live on the Releases page.  This lives in .gitignore rather
+# than .git/info/exclude on purpose: the source machine used the local exclude,
+# which does NOT travel with the repo, so a fresh clone saw releases/ as
+# untracked and a single 'git add -A' would have swept ~140 MB of installers
+# into the index.
+/releases/
+
+# The two baseline verification scripts are carried in the migration handoff
+# (project-data.tar.gz), not in the repo.
+/verify/

@@ -50,10 +50,29 @@ install.  The Linux packages depend on the distribution's `python3-numpy`,
 `python3-scipy`, `python3-matplotlib` and `python3-tk` (named
 `python3-tkinter` on RHEL-family distributions).
 
-**AlmaLinux / RHEL 10 additionally need EPEL.**  Of those four, only
+**AlmaLinux / RHEL 10 and matplotlib.**  Of those four, only
 `python3-matplotlib` is missing from the stock repositories (BaseOS,
 AppStream, CRB, Extras) — `numpy`, `scipy` and `tkinter` are all in
-AppStream.  Without EPEL the install stops with:
+AppStream.
+
+Since **4.2** the RPM installs on a stock system anyway: it requires
+`epel-release` (which *is* in the default Extras repo) and treats
+matplotlib as a weak dependency, so dnf never blocks the install.  On a box
+that already has EPEL loaded, matplotlib comes in automatically; otherwise
+one more command finishes the job, and both `%post` and the launcher tell you
+so:
+
+```bash
+sudo dnf install -y python3-matplotlib
+```
+
+*Why not just require it?*  dnf resolves a transaction against the repos
+enabled **before** that transaction starts, so it cannot see an EPEL package
+while `epel-release` is merely queued for installation in the same
+transaction.  Verified on dnf 4.20.0 — even
+`dnf install epel-release python3-matplotlib` fails with
+`No match for argument: python3-matplotlib`.  4.0 and 4.1 required it
+outright and so could not be installed on a stock system at all:
 
 ```
 Error: Problem: conflicting requests
@@ -61,7 +80,7 @@ Error: Problem: conflicting requests
 ```
 
 Ubuntu and Debian need nothing extra; all four are in their default
-archives.
+archives, so there matplotlib remains a hard `Depends`.
 
 ---
 
@@ -75,11 +94,12 @@ Run `CalEnEff_Setup.exe` and launch **CalEnEff** from the Start menu.
 
 ```bash
 # Ubuntu / Debian
-sudo apt install ./caleneff_4.1_all.deb
+sudo apt install ./caleneff_4.2_all.deb
 
-# AlmaLinux / RHEL — enable EPEL first; it is what provides python3-matplotlib
-sudo dnf install -y epel-release
-sudo dnf install ./caleneff-4.1-1.el10.noarch.rpm
+# AlmaLinux / RHEL — installs on a stock system; pulls in epel-release itself
+sudo dnf install ./caleneff-4.2-1.el10.noarch.rpm
+# then, only if it reports matplotlib is still missing:
+sudo dnf install -y python3-matplotlib
 
 caleneff
 ```

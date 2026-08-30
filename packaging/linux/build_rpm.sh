@@ -34,11 +34,14 @@ dnf install -y rpm-build python3 python3-pip
 # needs it -- numpy, scipy and tkinter are all in AppStream on
 # AlmaLinux/RHEL 10.
 #
-# This enables EPEL on the BUILD host only.  The RPM produced here
-# requires python3-matplotlib but deliberately does not require
-# epel-release, so an end user on a stock AlmaLinux 10 cannot install it
-# until they enable EPEL themselves.  Never smoke-test the RPM on this
-# build host -- it always succeeds here.  See README.md.
+# This enables EPEL on the BUILD host, which is needed to *build* against
+# matplotlib.  Note it also means this host can never tell you whether the
+# RPM installs on a stock system -- it always succeeds here.  Smoke-test on
+# a throwaway instance instead:
+#   wsl --install AlmaLinux-10 --name AlmaStock --no-launch
+# As of 4.2 the RPM does install on a stock box: matplotlib is a weak
+# dependency and epel-release a hard one.  See caleneff.spec for why no
+# arrangement of hard Requires can achieve that.
 if ! rpm -q epel-release &>/dev/null; then
     dnf install -y epel-release
     dnf makecache --timer
@@ -98,6 +101,25 @@ cp "$PROJ/packaging/linux/caleneff.desktop" "$RPMBUILD/SOURCES/"
 # ── launcher script ───────────────────────────────────────────────
 cat > "$RPMBUILD/SOURCES/caleneff.sh" <<'EOF'
 #!/bin/bash
+# python3-matplotlib is a weak dependency of this package because on
+# AlmaLinux/RHEL 10 it lives only in EPEL, and a hard Requires made the RPM
+# uninstallable on a stock system.  It can therefore legitimately be absent.
+# Say what to do about it instead of dying with an ImportError traceback.
+if ! python3 -c 'import matplotlib' >/dev/null 2>&1; then
+    cat >&2 <<'EOM'
+CalEnEff cannot start: the Python module "matplotlib" is not installed.
+
+On AlmaLinux / RHEL it ships in EPEL, which this package has already
+configured for you.  Run:
+
+    sudo dnf install -y python3-matplotlib
+
+On Debian / Ubuntu:
+
+    sudo apt install -y python3-matplotlib
+EOM
+    exit 1
+fi
 exec python3 /usr/share/caleneff/ra226_gui.py "$@"
 EOF
 chmod 755 "$RPMBUILD/SOURCES/caleneff.sh"

@@ -83,6 +83,23 @@ install -m 644 "$PROJ/packaging/linux/caleneff.desktop" \
 # ── launcher ─────────────────────────────────────────────────────
 cat > "$STAGING/usr/bin/caleneff" <<'EOF'
 #!/bin/bash
+# Kept identical to the RPM launcher so both distributions behave the same.
+# On Debian/Ubuntu matplotlib is a hard Depends, so this guard should never
+# fire here -- it exists for parity and for the pip-installed case.
+if ! python3 -c 'import matplotlib' >/dev/null 2>&1; then
+    cat >&2 <<'EOM'
+CalEnEff cannot start: the Python module "matplotlib" is not installed.
+
+On Debian / Ubuntu:
+
+    sudo apt install -y python3-matplotlib
+
+On AlmaLinux / RHEL (matplotlib ships in EPEL):
+
+    sudo dnf install -y python3-matplotlib
+EOM
+    exit 1
+fi
 exec python3 /usr/share/caleneff/ra226_gui.py "$@"
 EOF
 chmod 755 "$STAGING/usr/bin/caleneff"
@@ -91,9 +108,11 @@ chmod 755 "$STAGING/usr/bin/caleneff"
 cat > /tmp/changelog <<EOF
 caleneff (${VER}) stable; urgency=low
 
-  * Documentation only; no change to the application.
-  * Record the EPEL prerequisite for the RPM build (does not affect this
-    package: every dependency is in Debian/Ubuntu's default archives).
+  * No change to the application.
+  * The launcher now checks for matplotlib at startup and prints an actionable
+    message instead of an ImportError traceback. This matters mainly for the
+    RPM, where matplotlib became a weak dependency in 4.2; on Debian/Ubuntu it
+    stays a hard Depends, since every dependency is in the default archives.
 
  -- grainovski <grainovski@googlemail.com>  $(date -R)
 
