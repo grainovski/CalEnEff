@@ -47,7 +47,21 @@ not kept in the repository.
 
 The Windows installer bundles its own Python runtime — nothing else to
 install.  The Linux packages depend on the distribution's `python3-numpy`,
-`python3-scipy`, `python3-matplotlib` and `python3-tk`.
+`python3-scipy`, `python3-matplotlib` and `python3-tk` (named
+`python3-tkinter` on RHEL-family distributions).
+
+**AlmaLinux / RHEL 10 additionally need EPEL.**  Of those four, only
+`python3-matplotlib` is missing from the stock repositories (BaseOS,
+AppStream, CRB, Extras) — `numpy`, `scipy` and `tkinter` are all in
+AppStream.  Without EPEL the install stops with:
+
+```
+Error: Problem: conflicting requests
+  - nothing provides python3-matplotlib needed by caleneff-4.0-1.el10.noarch
+```
+
+Ubuntu and Debian need nothing extra; all four are in their default
+archives.
 
 ---
 
@@ -60,8 +74,13 @@ Run `CalEnEff_Setup.exe` and launch **CalEnEff** from the Start menu.
 ### Linux
 
 ```bash
-sudo apt install ./caleneff_4.0_all.deb      # Ubuntu / Debian
-sudo dnf install ./caleneff-4.0-1.el10.noarch.rpm   # AlmaLinux / RHEL
+# Ubuntu / Debian
+sudo apt install ./caleneff_4.0_all.deb
+
+# AlmaLinux / RHEL — enable EPEL first; it is what provides python3-matplotlib
+sudo dnf install -y epel-release
+sudo dnf install ./caleneff-4.0-1.el10.noarch.rpm
+
 caleneff
 ```
 

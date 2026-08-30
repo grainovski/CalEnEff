@@ -30,7 +30,15 @@ echo "Version: $VER  (from Ra226_Calibration.iss)"
 echo "Installing build deps..."
 dnf install -y rpm-build python3 python3-pip
 
-# Enable EPEL for scipy / matplotlib if not already present
+# Enable EPEL if not already present.  Only python3-matplotlib actually
+# needs it -- numpy, scipy and tkinter are all in AppStream on
+# AlmaLinux/RHEL 10.
+#
+# This enables EPEL on the BUILD host only.  The RPM produced here
+# requires python3-matplotlib but deliberately does not require
+# epel-release, so an end user on a stock AlmaLinux 10 cannot install it
+# until they enable EPEL themselves.  Never smoke-test the RPM on this
+# build host -- it always succeeds here.  See README.md.
 if ! rpm -q epel-release &>/dev/null; then
     dnf install -y epel-release
     dnf makecache --timer

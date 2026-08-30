@@ -32,6 +32,12 @@ Key features:
   - Built-in browser-based help (HowTo, Knowledge Database, About)
   - Pre-loaded Ra-226 reference data covering 46–2448 keV
 
+NOTE: the EPEL repository must be enabled before installing this package.
+python3-matplotlib is not in the stock BaseOS, AppStream, CRB or Extras
+repositories on AlmaLinux/RHEL 10; without EPEL the install fails with
+"nothing provides python3-matplotlib".  Run "dnf install -y epel-release"
+first.
+
 %install
 # License (packaged via %license so `rpm -qL caleneff` finds it)
 install -d %{buildroot}/usr/share/licenses/caleneff
