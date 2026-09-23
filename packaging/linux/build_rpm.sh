@@ -134,7 +134,19 @@ rpmbuild -bb "$RPMBUILD/SPECS/caleneff.spec" \
     --define "version $VER"
 
 # ── locate the output RPM ─────────────────────────────────────────
-RPM_FILE=$(find "$RPMBUILD/RPMS" -name "${PKG}-*.rpm" | head -1)
+# Match the version we just built, not "${PKG}-*.rpm".  The bare glob matches
+# every version ever built on this host and `head -1` then takes whichever the
+# filesystem happens to return first -- with 4.0, 4.1 and 4.2 all present in
+# RPMS/noarch it picked 4.1 and copied that stale package into dist/ as though
+# it were the new build.  Fail loudly rather than guess.
+RPM_MATCHES=$(find "$RPMBUILD/RPMS" -name "${PKG}-${VER}-*.rpm")
+RPM_COUNT=$(printf '%s\n' "$RPM_MATCHES" | grep -c . || true)
+if [ "$RPM_COUNT" -ne 1 ]; then
+    echo "ERROR: expected exactly one ${PKG}-${VER} RPM, found $RPM_COUNT:" >&2
+    printf '  %s\n' $RPM_MATCHES >&2
+    exit 1
+fi
+RPM_FILE=$RPM_MATCHES
 echo ""
 echo "=== RPM built: $RPM_FILE ==="
 ls -lh "$RPM_FILE"
