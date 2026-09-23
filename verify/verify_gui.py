@@ -23,6 +23,14 @@ sys.path.insert(0, str(REPO))
 import numpy as np
 import ra226_gui as G
 
+# _do_load() raises a modal error dialog on a malformed file.  That is what a
+# real user should see, but this suite runs unattended against a withdrawn
+# root, so the dialog is an orphan window that nothing ever dismisses and the
+# run used to block here forever.  Capture the call instead; the bad-file
+# check below asserts it happened, so suppressing it costs no coverage.
+_dialogs = []
+G.messagebox.showerror = lambda title, msg, **kw: _dialogs.append((title, msg))
+
 DATA = str(REPO / "226Ra_En_Area.txt")
 fails = []
 def check(name, cond, extra=""):
@@ -43,9 +51,12 @@ check("calibrate button enabled", str(app.btn_cal["state"]) == "normal")
 bad = np.loadtxt(DATA).copy(); bad[2, 1] = 0.0
 bp = os.path.join(os.environ["TEMP"], "_v4gui_bad.txt")
 np.savetxt(bp, bad)
-app._do_load(bp)                    # shows a messagebox? no - error path sets status
-check("bad file rejected, app alive", not app.engine.data_loaded,
-      app.status_lbl["text"][:70])
+app._do_load(bp)                    # raises a modal dialog - captured above
+# Assert the user is warned AND the load was refused.  Folded into the existing
+# check so the 24-check baseline is unchanged.
+check("bad file rejected, app alive",
+      not app.engine.data_loaded and len(_dialogs) == 1,
+      f"{app.status_lbl['text'][:52]} | dialog={_dialogs[-1][0] if _dialogs else None}")
 os.remove(bp)
 app._do_load(DATA)                  # reload the good one
 

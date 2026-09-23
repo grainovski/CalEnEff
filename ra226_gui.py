@@ -19,7 +19,7 @@ File columns (7, no index, ABSOLUTE uncertainties):
   ch  delta_ch  N  delta_N  E[keV]  I[%]  delta_I[%]
 """
 
-import os, sys, webbrowser, datetime, warnings
+import os, sys, shutil, webbrowser, datetime, warnings
 import numpy as np
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
@@ -997,6 +997,10 @@ class App(tk.Tk):
                 pass
 
         self.bind("<F1>", lambda e: self._open_howto())
+        self.bind("<Control-o>", lambda e: self._on_read())
+        self.bind("<Control-O>", lambda e: self._on_read())
+        self.bind("<Control-s>", lambda e: self._on_file_save())
+        self.bind("<Control-S>", lambda e: self._on_file_save())
         self._busy = False           # True while a calibration is running
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
@@ -1036,6 +1040,82 @@ class App(tk.Tk):
             self._status("⏳  Calibration running — please wait …", self.YELLOW)
             return
         self.destroy()
+
+    # ── File menu popup ───────────────────────────────────
+    def _show_file_popup(self):
+        """File menu: Open / Save / Save as / Exit.
+
+        Save and Save as stay disabled until a calibration has produced
+        results — there is nothing to write before that.
+        """
+        ready = self.engine.cal_ready
+        m = tk.Menu(self, tearoff=0)
+        m.add_command(label="Open…", accelerator="Ctrl+O",
+                      command=self._on_read)
+        m.add_separator()
+        m.add_command(label="Save", accelerator="Ctrl+S",
+                      command=self._on_file_save,
+                      state="normal" if ready else "disabled")
+        m.add_command(label="Save as…",
+                      command=self._on_file_save_as,
+                      state="normal" if ready else "disabled")
+        m.add_separator()
+        m.add_command(label="Exit", command=self._on_close)
+        x = self._file_btn.winfo_rootx()
+        y = self._file_btn.winfo_rooty() + self._file_btn.winfo_height()
+        try:
+            m.tk_popup(x, y)
+        finally:
+            m.grab_release()
+
+    def _on_file_save(self):
+        """Write the results to the default {basename}_Res.txt path.
+
+        A calibration already writes that file automatically, so usually this
+        only reports where it is.  It does real work when the automatic write
+        failed — a read-only directory, say — because _write_cal_to_file()
+        sets _res_file back to None in that case, and this retries it.
+        """
+        if not self.engine.cal_ready:
+            return
+        if not (self._res_file and os.path.exists(self._res_file)):
+            self._write_cal_to_file()
+        if self._res_file and os.path.exists(self._res_file):
+            self._status("✔  Results saved → %s"
+                         % os.path.basename(self._res_file), self.GREEN)
+
+    def _on_file_save_as(self):
+        """Save the results under a new name and keep writing there.
+
+        Copies the existing file rather than regenerating its text: query
+        results are APPENDED to the results file as they are calculated, so a
+        regenerated copy would silently drop every query already run.
+        """
+        if not self.engine.cal_ready:
+            return
+        if not (self._res_file and os.path.exists(self._res_file)):
+            self._write_cal_to_file()
+        if not (self._res_file and os.path.exists(self._res_file)):
+            messagebox.showerror("Save as", "There are no results to save yet.")
+            return
+        path = filedialog.asksaveasfilename(
+            title="Save results as", defaultextension=".txt",
+            initialdir=os.path.dirname(self._res_file),
+            initialfile=os.path.basename(self._res_file),
+            filetypes=[("Text files", "*.txt"), ("All files", "*.*")])
+        if not path:
+            return
+        try:
+            if os.path.abspath(path) != os.path.abspath(self._res_file):
+                shutil.copyfile(self._res_file, path)
+        except Exception as exc:
+            messagebox.showerror("Save as", "Could not save:\n%s" % exc)
+            self._status("⚠  Could not save results: %s" % exc, self.YELLOW)
+            return
+        # Adopt the new path so later queries append there, not to the old file.
+        self._res_file = path
+        self._status("✔  Results saved → %s" % os.path.basename(path),
+                     self.GREEN)
 
     # ── Help button popup ──────────────────────────────────────────────
     def _show_help_popup(self):
@@ -1088,6 +1168,14 @@ class App(tk.Tk):
         # top bar
         top = tk.Frame(self, bg=self.DARK, pady=7)
         top.pack(fill="x", padx=14)
+        self._file_btn = tk.Button(
+            top, text="File ▾",
+            font=("Segoe UI", 9),
+            bg=self.BORDER, fg=self.TEXT,
+            activebackground=self.MUTED, activeforeground=self.DARK,
+            relief="flat", bd=0, padx=8, pady=4,
+            cursor="hand2", command=self._show_file_popup)
+        self._file_btn.pack(side="left", padx=(0, 12))
         tk.Label(top,
                  text="Energy & Efficiency Calibration  —  Monte Carlo Fit",
                  font=("Segoe UI", 15, "bold"),
