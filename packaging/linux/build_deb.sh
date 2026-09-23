@@ -108,13 +108,23 @@ chmod 755 "$STAGING/usr/bin/caleneff"
 cat > /tmp/changelog <<EOF
 caleneff (${VER}) stable; urgency=low
 
+  * Add a File menu (Open / Save / Save as / Exit) in the top-left corner.
+    Results could previously only be saved to the automatic
+    {basename}_Res.txt written by each calibration.
+  * Save as copies that file rather than regenerating it, so query results
+    already appended to it are preserved.
+
+ -- grainovski <grainovski@googlemail.com>  $(date -R)
+
+caleneff (4.2) stable; urgency=low
+
   * No change to the application.
   * The launcher now checks for matplotlib at startup and prints an actionable
     message instead of an ImportError traceback. This matters mainly for the
     RPM, where matplotlib became a weak dependency in 4.2; on Debian/Ubuntu it
     stays a hard Depends, since every dependency is in the default archives.
 
- -- grainovski <grainovski@googlemail.com>  $(date -R)
+ -- grainovski <grainovski@googlemail.com>  Sun, 30 Aug 2026 15:00:00 +0300
 
 caleneff (4.0) stable; urgency=low
 

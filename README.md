@@ -94,10 +94,10 @@ Run `CalEnEff_Setup.exe` and launch **CalEnEff** from the Start menu.
 
 ```bash
 # Ubuntu / Debian
-sudo apt install ./caleneff_4.2_all.deb
+sudo apt install ./caleneff_4.3_all.deb
 
 # AlmaLinux / RHEL — installs on a stock system; pulls in epel-release itself
-sudo dnf install ./caleneff-4.2-1.el10.noarch.rpm
+sudo dnf install ./caleneff-4.3-1.el10.noarch.rpm
 # then, only if it reports matplotlib is still missing:
 sudo dnf install -y python3-matplotlib
 
@@ -187,9 +187,14 @@ interaction invisible when running from source.
 6.  Right-click any sub-plot → save just that panel.
     Right-click the figure margin → save the full figure.
 7.  ☀ / 🌙 (top-right) → switch between light and dark theme.
+8.  **File** (top-left) → `Open…` (Ctrl+O) to load a data file,
+    `Save` (Ctrl+S) to write the results file, `Save as…` to write it
+    elsewhere and keep writing there, and `Exit`.
 
 A timestamped result file is written next to the data file after every
-calibration and every query.
+calibration and every query, so `Save` is normally just a confirmation —
+it matters when the automatic write failed, e.g. a read-only directory.
+`Save as` copies that file, so query results already in it are kept.
 
 ---
 

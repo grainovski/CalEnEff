@@ -1,7 +1,7 @@
 # Version is supplied by build_rpm.sh via --define "version X.Y", which reads
 # it from Ra226_Calibration.iss so the whole project has one source of truth.
 # The fallback below only applies when rpmbuild is invoked by hand.
-%{!?version: %define version 4.2}
+%{!?version: %define version 4.3}
 
 Name:           caleneff
 Version:        %{version}
@@ -121,6 +121,13 @@ EOM
 fi
 
 %changelog
+* Tue Sep 23 2026 grainovski <grainovski@googlemail.com> - 4.3-1
+- Add a File menu (Open / Save / Save as / Exit) in the top-left corner.
+  There was previously no way to save results explicitly, and no way to
+  write them anywhere other than the automatic {basename}_Res.txt.
+- Save as copies the results file rather than regenerating it, so query
+  results already appended to it are preserved.
+
 * Sun Aug 30 2026 grainovski <grainovski@googlemail.com> - 4.2-1
 - The package now INSTALLS on a stock AlmaLinux/RHEL 10. 4.0 and 4.1 could not:
   they required python3-matplotlib outright, which exists only in EPEL, so dnf
