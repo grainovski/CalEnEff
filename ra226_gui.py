@@ -25,6 +25,12 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, simpledialog
 from scipy.optimize import curve_fit, OptimizeWarning
 
+# Writing the SpectraTools export lives in its own module: it needs no Tk and
+# is therefore importable and testable without a display.  It MUST stay listed
+# in packaging/linux/build_deb.sh and caleneff.spec, which install a fixed file
+# list and would otherwise ship a DEB and RPM that cannot import it.
+import spectratools_export
+
 # curve_fit raises OptimizeWarning when it cannot estimate the covariance.
 # The MC loops discard pcov entirely and skip any sample whose parameters come
 # back non-finite, so 10 000 iterations would flood stderr with warnings the
@@ -128,14 +134,6 @@ def _resource_dir():
     if getattr(sys, "frozen", False):
         return getattr(sys, "_MEIPASS", os.path.dirname(sys.executable))
     return os.path.dirname(os.path.abspath(__file__))
-
-#: Knots used when exporting a curve; see _relative_efficiency_curves.
-_EXPORT_KNOTS = 2048
-
-try:
-    from build_info import VERSION as _VERSION_STR
-except Exception:
-    _VERSION_STR = "unreleased"
 
 DEFAULT_FILE = os.path.join(_resource_dir(), "226Ra_En_Area.txt")   # auto-load if present
 
@@ -1128,88 +1126,6 @@ class App(tk.Tk):
     #                         reader resolves a _peaks file to the _bins file
     #                         beside it, so both are written together.
 
-    def _energy_cal_channel_to_energy(self):
-        """This calibration as SpectraTools wants it: E(ch) = a + b·ch.
-
-        CalEnEff fits the opposite direction, ch(E) = a + b·E, so the linear
-        fit is inverted exactly: a' = -a/b, b' = 1/b.
-
-        Only the linear fit is exported. A quadratic ch(E) has no exact
-        three-coefficient inverse, and writing an approximate one into a file
-        that a reader will treat as exact would be worse than not writing it.
-        """
-        a, b = (float(v) for v in self.engine.popt1)
-        if not b:
-            raise ValueError("energy calibration slope is zero; cannot invert")
-        return -a / b, 1.0 / b
-
-    def _relative_efficiency_curves(self, energies):
-        """(eff_krf, deff_krf, eff_rw, deff_rw) at `energies`, normalised.
-
-        Evaluated on at most _EXPORT_KNOTS knots and interpolated, because
-        predict_efficiency() re-evaluates the whole Monte Carlo sample at every
-        energy: doing that once per channel takes minutes on a 16k spectrum.
-        SpectraTools writes its own files the same way and for the same reason.
-
-        Normalised so the applied (KRF) curve peaks at 1, which is what
-        "relative efficiency" means in that format.
-        """
-        E = np.asarray(energies, dtype=float)
-        if E.size <= _EXPORT_KNOTS:
-            knots = E
-        else:
-            knots = np.linspace(E.min(), E.max(), _EXPORT_KNOTS)
-        cols = np.array([self.predict_efficiency_tuple(k) for k in knots])
-        # columns of predict_efficiency: krf_mean, krf_std, _, rw_mean, rw_std, _
-        picked = cols[:, [0, 1, 3, 4]]
-        peak = np.nanmax(picked[:, 0])
-        if not np.isfinite(peak) or peak <= 0:
-            raise ValueError("the KRF curve has no positive peak to normalise to")
-        picked = picked / peak
-        if knots is E:
-            out = picked
-        else:
-            out = np.column_stack([np.interp(E, knots, picked[:, j])
-                                   for j in range(4)])
-        return out, 1.0 / peak
-
-    def predict_efficiency_tuple(self, E):
-        """predict_efficiency() as a plain tuple (kept separate so the export
-        can be unit-tested without a window)."""
-        return self.engine.predict_efficiency(E)
-
-    def _spectratools_header(self, source_name, norm, e_lo, e_hi, npeaks,
-                             a_cal, b_cal, columns, extra_notes=()):
-        e = self.engine
-        rw = e.params_radware
-        lines = [
-            "SpectraTools relative efficiency",
-            "",
-            "applied model      : KRF",
-            "normalisation      : %.6g   (1 / peak of the applied curve)" % norm,
-            "fitted energy range: %.4f .. %.4f keV" % (e_lo, e_hi),
-            "peaks              : %d" % npeaks,
-            "KRF  params        : %s" % ", ".join("%.12g" % v for v in e.eff_popt),
-            "KRF  chi2/ndf      : %.6f / %d   Birge %.4f   RMS %.6g"
-            % (e.eff_chi2, e.eff_ndf, e.eff_birge, e.eff_rms),
-        ]
-        if rw is None or not len(rw):
-            lines.append("Radware            : did not converge")
-        else:
-            lines.append("Radware params     : %s"
-                         % ", ".join("%.12g" % v for v in np.nanmean(rw, axis=0)))
-        lines += [
-            "Monte Carlo        : KRF %d accepted, Radware %d accepted, "
-            "%d samples rejected" % (e.mc_krf_ok, e.mc_rw_ok, e.mc_bad),
-            "energy calibration : Calibration(kind='linear', a=%r, b=%r, c=0.0)"
-            % (a_cal, b_cal),
-            "source             : %s" % source_name,
-            "written by         : CalEnEff %s" % _VERSION_STR,
-        ]
-        lines += list(extra_notes)
-        lines += ["", "columns: %s" % columns]
-        return "".join("# %s\n" % l if l else "#\n" for l in lines)
-
     def _on_export_spectratools(self):
         """Write the energy and efficiency calibrations for SpectraTools."""
         e = self.engine
@@ -1218,7 +1134,7 @@ class App(tk.Tk):
                                 "Run a calibration first.")
             return
         try:
-            a_cal, b_cal = self._energy_cal_channel_to_energy()
+            a_cal, b_cal = spectratools_export.energy_cal_channel_to_energy(e)
         except ValueError as exc:
             messagebox.showerror("Export for SpectraTools", str(exc))
             return
@@ -1241,8 +1157,8 @@ class App(tk.Tk):
             return
 
         try:
-            written = self._write_spectratools_files(stem, channels,
-                                                    a_cal, b_cal)
+            written = spectratools_export.write_files(
+                e, stem, channels, a_cal, b_cal)
         except Exception as exc:
             messagebox.showerror("Export for SpectraTools",
                                  "Could not write the export:\n%s" % exc)
@@ -1256,55 +1172,6 @@ class App(tk.Tk):
             + "\n\nIn SpectraTools, load the _bins file from the efficiency "
               "window, and the _EnergyCal file as linear energy coefficients.")
 
-    def _write_spectratools_files(self, stem, channels, a_cal, b_cal):
-        """Write the three export files. Returns the paths written."""
-        e = self.engine
-        source = os.path.basename(e.filepath)
-        written = []
-
-        # 1. energy coefficients: bare numbers, one per line
-        cal_path = stem + "_EnergyCal.txt"
-        with open(cal_path, "w", encoding="utf-8") as fh:
-            fh.write("%.12g\n%.12g\n" % (a_cal, b_cal))
-        written.append(cal_path)
-
-        # 2. per-channel curve
-        ch = np.arange(int(channels), dtype=float)
-        E_ch = a_cal + b_cal * ch
-        bins, norm = self._relative_efficiency_curves(E_ch)
-        bins_path = stem + "_bins.txt"
-        with open(bins_path, "w", encoding="utf-8") as fh:
-            fh.write(self._spectratools_header(
-                source, norm, float(e.E.min()), float(e.E.max()), int(e.n),
-                a_cal, b_cal, "E  eff_krf  deff_krf  eff_rw  deff_rw",
-                extra_notes=[
-                    "",
-                    "one row per channel, evaluated through the energy "
-                    "calibration above",
-                    "curves interpolated from at most %d knots" % _EXPORT_KNOTS,
-                ]))
-            for E_i, row in zip(E_ch, bins):
-                fh.write("%14.6f %15.8g %15.8g %15.8g %15.8g\n"
-                         % (E_i, row[0], row[1], row[2], row[3]))
-        written.append(bins_path)
-
-        # 3. the same curve at the calibration lines
-        peaks, _ = self._relative_efficiency_curves(np.asarray(e.E, dtype=float))
-        peaks_path = stem + "_peaks.txt"
-        dE = getattr(e, "dE", None)
-        with open(peaks_path, "w", encoding="utf-8") as fh:
-            fh.write(self._spectratools_header(
-                source, norm, float(e.E.min()), float(e.E.max()), int(e.n),
-                a_cal, b_cal, "E  dE  eff_krf  deff_krf  eff_rw  deff_rw"))
-            for i, (E_i, row) in enumerate(zip(np.asarray(e.E, dtype=float),
-                                               peaks)):
-                d = float(dE[i]) if dE is not None else 0.0
-                fh.write("%14.6f %12.6f %15.8g %15.8g %15.8g %15.8g\n"
-                         % (E_i, d, row[0], row[1], row[2], row[3]))
-        written.append(peaks_path)
-        return written
-
-    # ── File menu popup ───────────────────────────────────
     def _show_file_popup(self):
         """File menu: Open / Save / Save as / Exit.
 

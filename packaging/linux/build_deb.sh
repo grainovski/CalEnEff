@@ -59,6 +59,10 @@ install -d "$STAGING/usr/share/doc/$PKG"
 # ── application files ─────────────────────────────────────────────
 install -m 644 "$PROJ/ra226_gui.py"      "$STAGING/usr/share/caleneff/"
 install -m 644 "$PROJ/help_content.py"   "$STAGING/usr/share/caleneff/"
+# Imported by ra226_gui at module level. This list is fixed, so a module added
+# to the project and not added here is silently missing from the .deb and the
+# app dies with ModuleNotFoundError on Ubuntu while working fine on Windows.
+install -m 644 "$PROJ/spectratools_export.py" "$STAGING/usr/share/caleneff/"
 install -m 644 "$PROJ/226Ra_En_Area.txt" "$STAGING/usr/share/caleneff/"
 install -m 644 "$PROJ/demo1.txt"         "$STAGING/usr/share/caleneff/"
 install -m 644 "$PROJ/demo2.txt"         "$STAGING/usr/share/caleneff/"

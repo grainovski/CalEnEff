@@ -91,6 +91,8 @@ print('BUILD_DATE = \"' + datetime.date.today().isoformat() + '\"')
 # ── copy sources ──────────────────────────────────────────────────
 cp "$PROJ/ra226_gui.py"                   "$RPMBUILD/SOURCES/"
 cp "$PROJ/help_content.py"                "$RPMBUILD/SOURCES/"
+# See build_deb.sh: a module missing from this list ships a broken RPM.
+cp "$PROJ/spectratools_export.py"         "$RPMBUILD/SOURCES/"
 cp "$PROJ/226Ra_En_Area.txt"              "$RPMBUILD/SOURCES/"
 cp "$PROJ/demo1.txt"                      "$RPMBUILD/SOURCES/"
 cp "$PROJ/demo2.txt"                      "$RPMBUILD/SOURCES/"
