@@ -108,6 +108,17 @@ chmod 755 "$STAGING/usr/bin/caleneff"
 cat > /tmp/changelog <<EOF
 caleneff (${VER}) stable; urgency=low
 
+  * An uncertainty band is never narrowed by a Birge ratio below 1. All four
+    plotted 1-sigma bands scaled unconditionally, so a ratio under 1 reported
+    an interval tighter than the Monte Carlo spread it came from. Bands now
+    inflate only, and their legends show the factor actually applied.
+  * Correct f_radware's docstring: the formula is dominated by max(f1, f2),
+    the less negative branch, not the more negative one. Code unchanged.
+
+ -- grainovski <grainovski@googlemail.com>  $(date -R)
+
+caleneff (4.4) stable; urgency=low
+
   * Results and file dialogs default to the user's Documents folder. An
     installed copy sits in a directory a standard user cannot write to, so a
     calibration on the bundled sample could not write its results at all.

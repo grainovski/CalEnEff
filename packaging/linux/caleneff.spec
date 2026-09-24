@@ -1,7 +1,7 @@
 # Version is supplied by build_rpm.sh via --define "version X.Y", which reads
 # it from Ra226_Calibration.iss so the whole project has one source of truth.
 # The fallback below only applies when rpmbuild is invoked by hand.
-%{!?version: %define version 4.4}
+%{!?version: %define version 4.5}
 
 Name:           caleneff
 Version:        %{version}
@@ -121,6 +121,18 @@ EOM
 fi
 
 %changelog
+* Wed Sep 24 2026 grainovski <grainovski@googlemail.com> - 4.5-1
+- An uncertainty band is never narrowed by a Birge ratio below 1. All four
+  plotted 1-sigma bands scaled unconditionally, so a ratio under 1 reported an
+  interval TIGHTER than the Monte Carlo spread it came from, understating the
+  uncertainty. Reachable by relaxing the quoted dN/dI, which come from
+  intensity tables: at x3 the efficiency Birge falls to 0.83 and the band was
+  narrowed to 83%%. Bands now inflate only.
+- The band legends report the factor actually applied rather than the raw
+  ratio, which would otherwise read "B=0.83" beside an unscaled band.
+- Correct f_radware's docstring: the formula is dominated by max(f1, f2), the
+  less negative branch, not the more negative one it claimed. Code unchanged.
+
 * Wed Sep 24 2026 grainovski <grainovski@googlemail.com> - 4.4-1
 - Nothing is written beside the executable any more. An installed copy sits
   under a directory a standard user cannot write to, so a calibration on the
