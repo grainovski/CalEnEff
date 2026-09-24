@@ -289,6 +289,25 @@ def _finite_mean_std(x, min_n=1):
     return float(np.mean(v)), float(np.std(v))
 
 
+def _band_scale(birge):
+    """Factor for widening an uncertainty band by a Birge ratio -- never below 1.
+
+    A Birge ratio under 1 means the quoted sigma were conservative relative to
+    the observed scatter. Scaling a band by such a ratio would make the reported
+    interval NARROWER than the Monte Carlo spread it was derived from, which
+    understates the uncertainty and has no statistical justification. Inflate
+    only: B > 1 widens, B <= 1 leaves the band as the MC produced it.
+
+    None and NaN (an un-run or degenerate fit) also return 1.0, so a band is
+    never silently scaled by a missing number.
+    """
+    try:
+        b = float(birge)
+    except (TypeError, ValueError):
+        return 1.0
+    return b if b > 1.0 else 1.0
+
+
 def _birge(chi2, ndf):
     """Birge ratio B = √(χ²/ndf).
 
@@ -346,9 +365,14 @@ def f_radware(E, a1, a2, a3, a4, a5, a6, g):
     where:
         f1 = a1 + a2·x + a3·x²     x = ln(E/100)   (low-E region)
         f2 = a4 + a5·y + a6·y²     y = ln(E/1000)  (high-E region)
-        f  = min(f1, f2)           (more-negative log-ε dominates)
+        f  = min(f1, f2)
         F  = max(f1, f2)
         r  = f / F                 (≥ 1 when both regions give ε < 1)
+
+    With r = f/F >= 1 (both f1, f2 negative for eff < 1) and g large,
+    (1 + r**g)**(-1/g) -> 1/r, so log_eff -> F: the result is dominated by
+    max(f1, f2), the LESS negative branch, i.e. the higher efficiency. An
+    earlier version of this docstring claimed the opposite.
 
     Implementation faithful to Radford's `eval()` in effit.c — note that f1,
     f2 are *log-efficiencies* (typically negative), NOT positive numbers.
@@ -1817,8 +1841,9 @@ class App(tk.Tk):
         cq = pq[:,0:1] + pq[:,1:2]*E_g + pq[:,2:3]*E_g**2
         ll, lh = np.percentile(cl, [15.87, 84.13], axis=0)
         ql, qh = np.percentile(cq, [15.87, 84.13], axis=0)
-        ll = clg - e.birge1*(clg - ll); lh = clg + e.birge1*(lh - clg)
-        ql = cqg - e.birge2*(cqg - ql); qh = cqg + e.birge2*(qh - cqg)
+        b1 = _band_scale(e.birge1); b2 = _band_scale(e.birge2)
+        ll = clg - b1*(clg - ll); lh = clg + b1*(lh - clg)
+        ql = cqg - b2*(cqg - ql); qh = cqg + b2*(qh - cqg)
         r1 = ch - f_lin(E, *e.popt1); r2 = ch - f_quad(E, *e.popt2)
 
         ax = self.ax_m
@@ -1881,12 +1906,13 @@ class App(tk.Tk):
             band_k = f_krf(E_g[None, :], pk[:, 0:1], pk[:, 1:2],
                            pk[:, 2:3], pk[:, 3:4]) * sc
             kl, kh = _band_percentiles(band_k)
-            kl = eg_k - e.eff_birge * (eg_k - kl)
-            kh = eg_k + e.eff_birge * (kh - eg_k)
+            bk = _band_scale(e.eff_birge)
+            kl = eg_k - bk * (eg_k - kl)
+            kh = eg_k + bk * (kh - eg_k)
             kl = np.clip(kl, y_lo * 0.5 - 0.1*y_hi, y_hi * 1.5)
             kh = np.clip(kh, y_lo * 0.5 - 0.1*y_hi, y_hi * 1.5)
             ax.fill_between(E_g, kl, kh, alpha=0.18, color=self.EFF_C,
-                            label=f"KRF 1σ  (B={e.eff_birge:.2f})")
+                            label=f"KRF 1σ  (×{bk:.2f})")
 
         # Radware curve + MC band  (5-parameter: C=0, G=15 fixed)
         if e.radware_popt is not None:
@@ -1898,12 +1924,13 @@ class App(tk.Tk):
                 band_r = f_radware_5p(E_g[None, :], pr[:, 0:1], pr[:, 1:2],
                                       pr[:, 2:3], pr[:, 3:4], pr[:, 4:5]) * sc
                 rl, rh = _band_percentiles(band_r)
-                rl = eg_r - e.radware_birge * (eg_r - rl)
-                rh = eg_r + e.radware_birge * (rh - eg_r)
+                br = _band_scale(e.radware_birge)
+                rl = eg_r - br * (eg_r - rl)
+                rh = eg_r + br * (rh - eg_r)
                 rl = np.clip(rl, y_lo * 0.5 - 0.1*y_hi, y_hi * 1.5)
                 rh = np.clip(rh, y_lo * 0.5 - 0.1*y_hi, y_hi * 1.5)
                 ax.fill_between(E_g, rl, rh, alpha=0.14, color=self.RAD_C,
-                                label=f"Rad 1σ  (B={e.radware_birge:.2f})")
+                                label=f"Rad 1σ  (×{br:.2f})")
 
         ax.set_ylim(y_lo, y_hi)
         ax.legend(fontsize=8, facecolor=self.PANEL,
