@@ -7,12 +7,12 @@ Interactive Tk/matplotlib tool that turns raw channel/peak data into
   propagation, Birge-scaled).
 * **Relative efficiency ε(E)** — fitted simultaneously with two
   independent models:
-  * **KFR** — 4-parameter `ε(E) = (a·E + b/E) · exp(c·E + d/E)`
+  * **KRF** — 4-parameter `ε(E) = (a·E + b/E) · exp(c·E + d/E)`
   * **Radware (5-parameter)** — following Radford's `effit.c`
     procedure (C and G held fixed; Levenberg-Marquardt + parset-style
     seed re-drawn for every Monte-Carlo iteration).
 * **a.u. ⇄ %** toggle — display the efficiency in arbitrary units or
-  in percent, normalized to the KFR curve peak (the underlying fits
+  in percent, normalized to the KRF curve peak (the underlying fits
   stay unchanged; χ² is scale-invariant).
 
 All predictions ship with Birge-corrected 1 σ uncertainty bands.
@@ -181,15 +181,24 @@ interaction invisible when running from source.
     efficiency Monte-Carlo, 10 000 resamples each).
 3.  **Calculate Energy** → enter ch ± Δch, get E ± δE for linear and
     quadratic models.
-4.  **Get Efficiency** → enter E (keV), get ε ± δε for KFR and Radware.
+4.  **Get Efficiency** → enter E (keV), get ε ± δε for KRF and Radware.
 5.  **a.u. → %** → toggle between arbitrary units and percent of the
-    KFR peak.
+    KRF peak.
 6.  Right-click any sub-plot → save just that panel.
     Right-click the figure margin → save the full figure.
 7.  ☀ / 🌙 (top-right) → switch between light and dark theme.
 8.  **File** (top-left) → `Open…` (Ctrl+O) to load a data file,
     `Save` (Ctrl+S) to write the results file, `Save as…` to write it
     elsewhere and keep writing there, and `Exit`.
+9.  **File → Export for SpectraTools…** → writes three files SpectraTools
+    6.1.1 reads: `<name>_EnergyCal.txt` (linear energy coefficients),
+    `<name>_bins.txt` (the relative efficiency curve, one row per channel)
+    and `<name>_peaks.txt` (the same at the calibration lines). You are
+    asked for the channel count of the spectrum it will be applied to,
+    default 16384 — that sets the energy range the file covers, so too
+    small a value leaves the upper calibration lines outside it.
+    Only the *linear* energy fit is exported: SpectraTools wants
+    `E = a + b·ch` and a quadratic `ch(E)` has no exact inverse.
 
 A timestamped result file is written next to the data file after every
 calibration and every query, so `Save` is normally just a confirmation —
@@ -224,7 +233,7 @@ it matters when the automatic write failed, e.g. a read-only directory.
 * **Linear / quadratic energy fits** — weighted least squares against
   Δch.  10 000 batched MC fits give the parameter covariance and
   the propagated δE.
-* **KFR efficiency** —
+* **KRF efficiency** —
   `ε(E) = (a·E + b/E)·exp(c·E + d/E)`.
   Multi-start `curve_fit` (TRF, bounded) + MC warm-started from the
   best-fit popt.

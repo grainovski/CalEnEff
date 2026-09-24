@@ -91,7 +91,7 @@ t0 = time.time(); eng.calibrate(); t_en = time.time()-t0
 check("energy calibrate", eng.cal_ready, f"{t_en:.2f}s  B1={eng.birge1:.3f} B2={eng.birge2:.3f}")
 t0 = time.time(); eng.calibrate_efficiency(); t_ef = time.time()-t0
 check("efficiency calibrate", eng.eff_ready,
-      f"{t_ef:.1f}s  KFR ok={eng.mc_kfr_ok} RW ok={eng.mc_rw_ok} bad={eng.mc_bad}")
+      f"{t_ef:.1f}s  KRF ok={eng.mc_krf_ok} RW ok={eng.mc_rw_ok} bad={eng.mc_bad}")
 check("params_eff is 2-D", eng.params_eff.ndim == 2, str(eng.params_eff.shape))
 
 # ── 4. predict() reproducibility (issue #1) ──────────────────────────────
@@ -107,7 +107,7 @@ check("different input -> different result", r3[0] != r1[0], f"{r3[0]:.3f}")
 # ── 5. predict_efficiency ────────────────────────────────────────────────
 pe = eng.predict_efficiency(1000.0)
 check("predict_efficiency finite", np.isfinite(pe[0]) and np.isfinite(pe[1]),
-      f"KFR={pe[0]:.4g}+-{pe[1]:.4g}  RW={pe[3]:.4g}+-{pe[4]:.4g}")
+      f"KRF={pe[0]:.4g}+-{pe[1]:.4g}  RW={pe[3]:.4g}+-{pe[4]:.4g}")
 # Wild extrapolation must not raise
 for Ex in (0.001, 1e6):
     try:
@@ -129,9 +129,9 @@ eng.params_eff = saved
 # ── 7. Vectorised band == old per-sample loop ────────────────────────────
 E_g = np.linspace(eng.E.min()*0.96, eng.E.max()*1.02, 400)
 p = eng.params_eff[:200]
-old = np.array([G.f_kfr(E_g, *pp) for pp in p])
-new = G.f_kfr(E_g[None, :], p[:,0:1], p[:,1:2], p[:,2:3], p[:,3:4])
-check("KFR band vectorised == loop", np.allclose(old, new, equal_nan=True),
+old = np.array([G.f_krf(E_g, *pp) for pp in p])
+new = G.f_krf(E_g[None, :], p[:,0:1], p[:,1:2], p[:,2:3], p[:,3:4])
+check("KRF band vectorised == loop", np.allclose(old, new, equal_nan=True),
       f"maxdiff={np.nanmax(np.abs(old-new)):.3e}")
 pr = eng.params_radware[:200]
 oldr = np.array([G.f_radware_5p(E_g, *pp) for pp in pr])
@@ -141,11 +141,11 @@ check("Radware band vectorised == loop", np.allclose(oldr, newr, equal_nan=True)
 
 # speed comparison
 t0=time.time()
-for _ in range(3): np.array([G.f_kfr(E_g, *pp) for pp in eng.params_eff[:4000]])
+for _ in range(3): np.array([G.f_krf(E_g, *pp) for pp in eng.params_eff[:4000]])
 t_loop=(time.time()-t0)/3
 pk = eng.params_eff[:4000]
 t0=time.time()
-for _ in range(3): G.f_kfr(E_g[None,:], pk[:,0:1], pk[:,1:2], pk[:,2:3], pk[:,3:4])
+for _ in range(3): G.f_krf(E_g[None,:], pk[:,0:1], pk[:,1:2], pk[:,2:3], pk[:,3:4])
 t_vec=(time.time()-t0)/3
 print(f"\n  band build: loop {t_loop*1000:.1f} ms  ->  vectorised {t_vec*1000:.1f} ms "
       f"({t_loop/max(t_vec,1e-9):.0f}x faster)")

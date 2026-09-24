@@ -46,7 +46,7 @@ Recommends:     python3-matplotlib
 CalEnEff is a desktop application for gamma-ray energy and efficiency
 calibration using a Ra-226 reference source. It performs weighted
 polynomial fitting for energy calibration and fits a four-parameter
-semi-empirical efficiency model (KFR) with Monte Carlo uncertainty
+semi-empirical efficiency model (KRF) with Monte Carlo uncertainty
 propagation (10 000 trials).
 
 Key features:

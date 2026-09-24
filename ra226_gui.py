@@ -19,10 +19,10 @@ File columns (7, no index, ABSOLUTE uncertainties):
   ch  delta_ch  N  delta_N  E[keV]  I[%]  delta_I[%]
 """
 
-import os, sys, shutil, webbrowser, datetime, warnings
+import os, sys, shutil, tempfile, webbrowser, datetime, warnings
 import numpy as np
 import tkinter as tk
-from tkinter import ttk, filedialog, messagebox
+from tkinter import ttk, filedialog, messagebox, simpledialog
 from scipy.optimize import curve_fit, OptimizeWarning
 
 # curve_fit raises OptimizeWarning when it cannot estimate the covariance.
@@ -51,7 +51,7 @@ N_BAND    =   4_000
 
 # Minimum number of calibration points.  The quadratic energy fit has 3 free
 # parameters, so ndf = n − 3 > 0 requires n ≥ 4; below that the Birge ratio
-# divides by zero.  The efficiency models need more (KFR 4, Radware 5) and are
+# divides by zero.  The efficiency models need more (KRF 4, Radware 5) and are
 # guarded individually rather than blocking the load.
 MIN_POINTS = 4
 
@@ -73,12 +73,53 @@ SAVE_FILETYPES = [
 SAVE_EXTS = {"png", "pdf", "svg", "eps", "ps",
              "jpg", "jpeg", "tif", "tiff", "webp"}
 
+def _documents_dir():
+    """The user's Documents folder, or their home directory if absent.
+
+    Everything the program writes defaults here rather than beside the
+    executable.  An installed copy lives under Program Files, which a normal
+    user cannot write to, so a results file placed next to the program -- or
+    next to the bundled sample data, which is inside the program folder --
+    could not be created at all.
+    """
+    home = os.path.expanduser("~")
+    docs = os.path.join(home, "Documents")
+    return docs if os.path.isdir(docs) else home
+
 def _base_dir():
-    """User-facing starting directory for file dialogs.
-    Windows → Desktop; Linux/macOS → home directory."""
-    if sys.platform == "win32":
-        return os.path.join(os.path.expanduser("~"), "Desktop")
-    return os.path.expanduser("~")
+    """User-facing starting directory for file dialogs."""
+    return _documents_dir()
+
+def _is_writable(directory):
+    """True if a file can actually be created in `directory`.
+
+    Decided by creating one, not by inspecting permissions: on Windows the
+    Program Files ACL grants a standard user read and execute but not write,
+    and os.access(W_OK) does not reliably report that.
+    """
+    if not directory or not os.path.isdir(directory):
+        return False
+    try:
+        fd, tmp = tempfile.mkstemp(prefix=".caleneff_wtest", dir=directory)
+    except Exception:
+        return False
+    os.close(fd)
+    try:
+        os.remove(tmp)
+    except OSError:
+        pass
+    return True
+
+def _results_dir_for(datapath):
+    """Directory to write the results file for `datapath` into.
+
+    Beside the data file when that is writable, which is where the user
+    expects it.  It is not writable when an installed copy auto-loads its own
+    bundled sample: that file sits inside the program folder, so fall back to
+    Documents instead of failing the write.
+    """
+    d = os.path.dirname(os.path.abspath(datapath))
+    return d if _is_writable(d) else _documents_dir()
 
 def _resource_dir():
     """Directory where bundled assets (data files, icon) live.
@@ -87,6 +128,14 @@ def _resource_dir():
     if getattr(sys, "frozen", False):
         return getattr(sys, "_MEIPASS", os.path.dirname(sys.executable))
     return os.path.dirname(os.path.abspath(__file__))
+
+#: Knots used when exporting a curve; see _relative_efficiency_curves.
+_EXPORT_KNOTS = 2048
+
+try:
+    from build_info import VERSION as _VERSION_STR
+except Exception:
+    _VERSION_STR = "unreleased"
 
 DEFAULT_FILE = os.path.join(_resource_dir(), "226Ra_En_Area.txt")   # auto-load if present
 
@@ -156,21 +205,21 @@ _TIP_E_BF = (
     "  Quadratic: solve  a + b·E + c·E² = ch₀\n\n"
     "Use the MC σ row above as the uncertainty."
 )
-# Per-row result tooltips (efficiency — KFR)
+# Per-row result tooltips (efficiency — KRF)
 _TIP_EFF_MC = (
-    "KFR MC mean efficiency at E₀:\n"
-    "Mean of f_kfr(E₀) over 10,000 MC refits,\n"
+    "KRF MC mean efficiency at E₀:\n"
+    "Mean of f_krf(E₀) over 10,000 MC refits,\n"
     "each with N and I resampled from N(μ, σ).\n"
     "Value is in arbitrary units (depends on geometry)."
 )
 _TIP_DEFF = (
-    "KFR MC 1σ uncertainty on ε:\n"
+    "KRF MC 1σ uncertainty on ε:\n"
     "Standard deviation of ε over 10,000 refits of the\n"
-    "KFR function, each with N and I resampled from\n"
+    "KRF function, each with N and I resampled from\n"
     "their stated Gaussian uncertainties."
 )
 _TIP_EFF_BF = (
-    "KFR best-fit efficiency: f_kfr(E₀, *popt)\n"
+    "KRF best-fit efficiency: f_krf(E₀, *popt)\n"
     "where popt is the least-squares fit to all data.\n\n"
     "Use the MC σ row above as the uncertainty."
 )
@@ -206,7 +255,7 @@ def _ns(x, fmt=".5g"):
 def _band_percentiles(band, lo=15.87, hi=84.13):
     """1σ percentile envelope of an (n_samples, n_grid) MC band.
 
-    Non-finite entries are masked to NaN first: KFR's exp(d/E) overflows to
+    Non-finite entries are masked to NaN first: KRF's exp(d/E) overflows to
     +inf and Radware's log-polynomial diverges when the curve is evaluated
     well outside the fitted range, and np.nanpercentile ignores NaN but not
     inf — so without the mask a handful of runaway samples would swallow the
@@ -286,8 +335,8 @@ def _invert_quadratic(a, b, c, ch, ref):
 def f_lin(E, a, b):     return a + b * E
 def f_quad(E, a, b, c): return a + b * E + c * E**2
 
-def f_kfr(E, a, b, c, d):
-    """KFR 4-parameter efficiency:  ε(E) = (aE + b/E)·exp(cE + d/E)"""
+def f_krf(E, a, b, c, d):
+    """KRF 4-parameter efficiency:  ε(E) = (aE + b/E)·exp(cE + d/E)"""
     return (a * E + b / E) * np.exp(c * E + d / E)
 
 def f_radware(E, a1, a2, a3, a4, a5, a6, g):
@@ -327,8 +376,8 @@ def f_radware(E, a1, a2, a3, a4, a5, a6, g):
 
 # ── Efficiency fitting helpers ─────────────────────────────────────────────────
 
-def _kfr_p0(E, eff):
-    """Data-driven initial parameters for KFR: ε=(aE+b/E)exp(cE+d/E).
+def _krf_p0(E, eff):
+    """Data-driven initial parameters for KRF: ε=(aE+b/E)exp(cE+d/E).
 
     Derive a,b from geometric-mean efficiency and energy so the model
     reproduces the typical scale; seed c,d small so the exponential is ~1.
@@ -636,11 +685,11 @@ class CalibrationEngine:
         self.params_radware = None
         self.radware_rms    = self.radware_birge = None
         self.radware_chi2   = self.radware_ndf   = None
-        # Normalization factor for % mode: eff_norm = 100 / max(KFR curve)
+        # Normalization factor for % mode: eff_norm = 100 / max(KRF curve)
         # Multiply any a.u. value by eff_norm to convert to %.
         self.eff_norm   = None
         self.eff_ready  = False
-        self.mc_kfr_ok  = self.mc_rw_ok = self.mc_bad = 0
+        self.mc_krf_ok  = self.mc_rw_ok = self.mc_bad = 0
 
     def load(self, filepath):
         """Read and validate a 7-column calibration file.
@@ -753,33 +802,33 @@ class CalibrationEngine:
         deff = eff * np.sqrt((self.dN/self.N)**2 + (self.dI_pct/self.I_pct)**2)
         self.eff = eff; self.deff = deff
 
-        bounds_kfr = ([0, 0, -np.inf, -np.inf], [np.inf, np.inf, 0, np.inf])
+        bounds_krf = ([0, 0, -np.inf, -np.inf], [np.inf, np.inf, 0, np.inf])
 
-        # ── KFR best-fit — multi-start ────────────────────────────────
-        if progress_cb: progress_cb(5, "Best-fit KFR curve …")
-        p0_data = _kfr_p0(self.E, eff)
-        kfr_candidates = [
+        # ── KRF best-fit — multi-start ────────────────────────────────
+        if progress_cb: progress_cb(5, "Best-fit KRF curve …")
+        p0_data = _krf_p0(self.E, eff)
+        krf_candidates = [
             p0_data,
             [p0_data[0]*2,  p0_data[1]*2,  -1e-4, 1.0],
             [p0_data[0]*0.5,p0_data[1]*0.5,-5e-4, 0.5],
             [p0_data[0],    p0_data[1],    -1e-3, 2.0],
             [1.0, 1e3, -1e-3, 0.0],          # original fixed seed as fallback
         ]
-        popt_kfr = _multistart(f_kfr, self.E, eff, deff,
-                               kfr_candidates, bounds_kfr)
-        if popt_kfr is None:
-            raise RuntimeError("KFR fit failed to converge from all starting points.")
-        self.eff_popt = popt_kfr
-        res_k = eff - f_kfr(self.E, *popt_kfr)
+        popt_krf = _multistart(f_krf, self.E, eff, deff,
+                               krf_candidates, bounds_krf)
+        if popt_krf is None:
+            raise RuntimeError("KRF fit failed to converge from all starting points.")
+        self.eff_popt = popt_krf
+        res_k = eff - f_krf(self.E, *popt_krf)
         self.eff_rms   = float(np.sqrt(np.mean(res_k**2)))
         self.eff_ndf   = len(self.E) - 4
         self.eff_chi2  = float(np.sum((res_k/deff)**2))
         self.eff_birge = _birge(self.eff_chi2, self.eff_ndf)
 
-        # Normalization factor: 100 / peak(KFR curve) for % display mode
+        # Normalization factor: 100 / peak(KRF curve) for % display mode
         _E_fine = np.linspace(max(self.E.min() * 0.9, 1.0),
                                self.E.max() * 1.1, 2000)
-        _eff_fine = f_kfr(_E_fine, *popt_kfr)
+        _eff_fine = f_krf(_E_fine, *popt_krf)
         _eff_ok   = _eff_fine[np.isfinite(_eff_fine) & (_eff_fine > 0)]
         _peak = float(np.max(_eff_ok)) if len(_eff_ok) > 0 else 1.0
         self.eff_norm = 100.0 / max(_peak, 1e-30)
@@ -836,7 +885,7 @@ class CalibrationEngine:
         #     fall through to the next seed.
         #   • Progress callback every 100 iter → UI updates ~1× per second.
         rng = np.random.default_rng(SEED)
-        store_kfr = []; store_rw = []
+        store_krf = []; store_rw = []
         n_bad     = 0          # count rejected pathological samples
         MC_MAXFEV = 1500
         MC_TOL    = 1e-5       # ftol = xtol = gtol for MC fits
@@ -858,16 +907,16 @@ class CalibrationEngine:
                 n_bad += 1
                 continue
 
-            # KFR — LM, warm-start from best-fit popt.
+            # KRF — LM, warm-start from best-fit popt.
             try:
                 pp, _ = curve_fit(
-                    f_kfr, self.E, eff_s, p0=popt_kfr,
+                    f_krf, self.E, eff_s, p0=popt_krf,
                     sigma=deff, absolute_sigma=True,
                     maxfev=MC_MAXFEV, method="lm",
                     ftol=MC_TOL, xtol=MC_TOL, gtol=MC_TOL,
                 )
                 if np.all(np.isfinite(pp)):
-                    store_kfr.append(pp)
+                    store_krf.append(pp)
             except Exception:
                 pass
 
@@ -902,11 +951,11 @@ class CalibrationEngine:
         # Keep params_eff 2-D even when every MC fit failed.  np.array([]) is
         # 1-D, so params_eff[:, 0] would raise "too many indices" and surface
         # as a cryptic status-bar error rather than an honest "MC failed".
-        self.params_eff     = (np.asarray(store_kfr, dtype=float)
-                               if store_kfr else np.empty((0, 4)))
+        self.params_eff     = (np.asarray(store_krf, dtype=float)
+                               if store_krf else np.empty((0, 4)))
         self.params_radware = (np.asarray(store_rw, dtype=float)
                                if store_rw else None)
-        self.mc_kfr_ok = len(self.params_eff)
+        self.mc_krf_ok = len(self.params_eff)
         self.mc_rw_ok  = (0 if self.params_radware is None
                           else len(self.params_radware))
         self.mc_bad    = n_bad
@@ -917,23 +966,23 @@ class CalibrationEngine:
         """Evaluate both efficiency models and their MC spread at E₀.
 
         Both models can blow up when extrapolated outside the fitted range —
-        KFR's exp(d/E) overflows for large d/E, Radware's log-polynomial
+        KRF's exp(d/E) overflows for large d/E, Radware's log-polynomial
         diverges — so non-finite MC samples are filtered out, and fewer than
         10 survivors is reported as NaN rather than as a meaningless σ.
         """
         E = float(E_val)
 
-        # KFR.  params_eff is always 2-D (possibly with zero rows) so the
+        # KRF.  params_eff is always 2-D (possibly with zero rows) so the
         # column slices below are safe even when every MC fit failed.
         with np.errstate(over="ignore", invalid="ignore", divide="ignore"):
             if len(self.params_eff):
                 p = self.params_eff
-                v_k = f_kfr(E, p[:, 0], p[:, 1], p[:, 2], p[:, 3])
-                kfr_mean, kfr_std = _finite_mean_std(v_k, min_n=10)
+                v_k = f_krf(E, p[:, 0], p[:, 1], p[:, 2], p[:, 3])
+                krf_mean, krf_std = _finite_mean_std(v_k, min_n=10)
             else:
-                kfr_mean = kfr_std = float("nan")
-            kfr_bf_raw = float(f_kfr(E, *self.eff_popt))
-        kfr_bf = kfr_bf_raw if np.isfinite(kfr_bf_raw) else float("nan")
+                krf_mean = krf_std = float("nan")
+            krf_bf_raw = float(f_krf(E, *self.eff_popt))
+        krf_bf = krf_bf_raw if np.isfinite(krf_bf_raw) else float("nan")
 
         # Radware — 5-parameter model (C=0, G=15 fixed)
         rw_mean = rw_std = rw_bf = float("nan")
@@ -946,7 +995,7 @@ class CalibrationEngine:
             if self.radware_popt is not None:
                 rw_bf_raw = float(f_radware_5p(E, *self.radware_popt))
                 rw_bf = rw_bf_raw if np.isfinite(rw_bf_raw) else float("nan")
-        return kfr_mean, kfr_std, kfr_bf, rw_mean, rw_std, rw_bf
+        return krf_mean, krf_std, krf_bf, rw_mean, rw_std, rw_bf
 
     def predict(self, ch_val, dch_val):
         """Invert ch(E) at ch₀ ± Δch₀ by Monte Carlo.
@@ -1009,7 +1058,7 @@ class App(tk.Tk):
         self._eff_q_arts = []   # efficiency query artists on ax_eff
         self._res_file   = None  # path of the current results .txt file
         self._eff_pct_mode       = False   # False → a.u., True → %
-        self._last_eff_query_au  = None    # (E_val, kfr_mean, kfr_std, kfr_bf,
+        self._last_eff_query_au  = None    # (E_val, krf_mean, krf_std, krf_bf,
                                            #  rw_mean, rw_std, rw_bf) in a.u.
 
         self._apply_ttk_style("dark")
@@ -1041,6 +1090,196 @@ class App(tk.Tk):
             return
         self.destroy()
 
+    # ── SpectraTools export ───────────────────────────────
+    #
+    # Three files, in the formats SpectraTools 6.1.1 reads:
+    #
+    #   <stem>_EnergyCal.txt  read by calibration.read_coefficients_file():
+    #                         bare numbers, one coefficient per line.
+    #   <stem>_bins.txt       read by efficiency_io.read_saved_efficiency():
+    #                         '# SpectraTools relative efficiency' marker on
+    #                         line 1, '# columns:' naming 5 columns with no dE,
+    #                         one row per channel.
+    #   <stem>_peaks.txt      the same curve at the calibration lines only. Its
+    #                         reader resolves a _peaks file to the _bins file
+    #                         beside it, so both are written together.
+
+    def _energy_cal_channel_to_energy(self):
+        """This calibration as SpectraTools wants it: E(ch) = a + b·ch.
+
+        CalEnEff fits the opposite direction, ch(E) = a + b·E, so the linear
+        fit is inverted exactly: a' = -a/b, b' = 1/b.
+
+        Only the linear fit is exported. A quadratic ch(E) has no exact
+        three-coefficient inverse, and writing an approximate one into a file
+        that a reader will treat as exact would be worse than not writing it.
+        """
+        a, b = (float(v) for v in self.engine.popt1)
+        if not b:
+            raise ValueError("energy calibration slope is zero; cannot invert")
+        return -a / b, 1.0 / b
+
+    def _relative_efficiency_curves(self, energies):
+        """(eff_krf, deff_krf, eff_rw, deff_rw) at `energies`, normalised.
+
+        Evaluated on at most _EXPORT_KNOTS knots and interpolated, because
+        predict_efficiency() re-evaluates the whole Monte Carlo sample at every
+        energy: doing that once per channel takes minutes on a 16k spectrum.
+        SpectraTools writes its own files the same way and for the same reason.
+
+        Normalised so the applied (KRF) curve peaks at 1, which is what
+        "relative efficiency" means in that format.
+        """
+        E = np.asarray(energies, dtype=float)
+        if E.size <= _EXPORT_KNOTS:
+            knots = E
+        else:
+            knots = np.linspace(E.min(), E.max(), _EXPORT_KNOTS)
+        cols = np.array([self.predict_efficiency_tuple(k) for k in knots])
+        # columns of predict_efficiency: krf_mean, krf_std, _, rw_mean, rw_std, _
+        picked = cols[:, [0, 1, 3, 4]]
+        peak = np.nanmax(picked[:, 0])
+        if not np.isfinite(peak) or peak <= 0:
+            raise ValueError("the KRF curve has no positive peak to normalise to")
+        picked = picked / peak
+        if knots is E:
+            out = picked
+        else:
+            out = np.column_stack([np.interp(E, knots, picked[:, j])
+                                   for j in range(4)])
+        return out, 1.0 / peak
+
+    def predict_efficiency_tuple(self, E):
+        """predict_efficiency() as a plain tuple (kept separate so the export
+        can be unit-tested without a window)."""
+        return self.engine.predict_efficiency(E)
+
+    def _spectratools_header(self, source_name, norm, e_lo, e_hi, npeaks,
+                             a_cal, b_cal, columns, extra_notes=()):
+        e = self.engine
+        rw = e.params_radware
+        lines = [
+            "SpectraTools relative efficiency",
+            "",
+            "applied model      : KRF",
+            "normalisation      : %.6g   (1 / peak of the applied curve)" % norm,
+            "fitted energy range: %.4f .. %.4f keV" % (e_lo, e_hi),
+            "peaks              : %d" % npeaks,
+            "KRF  params        : %s" % ", ".join("%.12g" % v for v in e.eff_popt),
+            "KRF  chi2/ndf      : %.6f / %d   Birge %.4f   RMS %.6g"
+            % (e.eff_chi2, e.eff_ndf, e.eff_birge, e.eff_rms),
+        ]
+        if rw is None or not len(rw):
+            lines.append("Radware            : did not converge")
+        else:
+            lines.append("Radware params     : %s"
+                         % ", ".join("%.12g" % v for v in np.nanmean(rw, axis=0)))
+        lines += [
+            "Monte Carlo        : KRF %d accepted, Radware %d accepted, "
+            "%d samples rejected" % (e.mc_krf_ok, e.mc_rw_ok, e.mc_bad),
+            "energy calibration : Calibration(kind='linear', a=%r, b=%r, c=0.0)"
+            % (a_cal, b_cal),
+            "source             : %s" % source_name,
+            "written by         : CalEnEff %s" % _VERSION_STR,
+        ]
+        lines += list(extra_notes)
+        lines += ["", "columns: %s" % columns]
+        return "".join("# %s\n" % l if l else "#\n" for l in lines)
+
+    def _on_export_spectratools(self):
+        """Write the energy and efficiency calibrations for SpectraTools."""
+        e = self.engine
+        if not (e.cal_ready and e.eff_ready):
+            messagebox.showinfo("Export for SpectraTools",
+                                "Run a calibration first.")
+            return
+        try:
+            a_cal, b_cal = self._energy_cal_channel_to_energy()
+        except ValueError as exc:
+            messagebox.showerror("Export for SpectraTools", str(exc))
+            return
+
+        stem = filedialog.asksaveasfilename(
+            title="Export for SpectraTools — base name",
+            initialdir=_results_dir_for(e.filepath),
+            initialfile=os.path.splitext(os.path.basename(e.filepath))[0],
+            defaultextension=".txt",
+            filetypes=[("Text files", "*.txt"), ("All files", "*.*")])
+        if not stem:
+            return
+        stem = os.path.splitext(stem)[0]
+
+        channels = simpledialog.askinteger(
+            "Export for SpectraTools",
+            "Number of channels in the spectrum this will be applied to:",
+            parent=self, initialvalue=16384, minvalue=2, maxvalue=1 << 22)
+        if not channels:
+            return
+
+        try:
+            written = self._write_spectratools_files(stem, channels,
+                                                    a_cal, b_cal)
+        except Exception as exc:
+            messagebox.showerror("Export for SpectraTools",
+                                 "Could not write the export:\n%s" % exc)
+            self._status("⚠  Export failed: %s" % exc, self.YELLOW)
+            return
+        self._status("✔  Exported %d files for SpectraTools → %s"
+                     % (len(written), os.path.basename(stem)), self.GREEN)
+        messagebox.showinfo(
+            "Export for SpectraTools",
+            "Written:\n\n" + "\n".join(os.path.basename(p) for p in written)
+            + "\n\nIn SpectraTools, load the _bins file from the efficiency "
+              "window, and the _EnergyCal file as linear energy coefficients.")
+
+    def _write_spectratools_files(self, stem, channels, a_cal, b_cal):
+        """Write the three export files. Returns the paths written."""
+        e = self.engine
+        source = os.path.basename(e.filepath)
+        written = []
+
+        # 1. energy coefficients: bare numbers, one per line
+        cal_path = stem + "_EnergyCal.txt"
+        with open(cal_path, "w", encoding="utf-8") as fh:
+            fh.write("%.12g\n%.12g\n" % (a_cal, b_cal))
+        written.append(cal_path)
+
+        # 2. per-channel curve
+        ch = np.arange(int(channels), dtype=float)
+        E_ch = a_cal + b_cal * ch
+        bins, norm = self._relative_efficiency_curves(E_ch)
+        bins_path = stem + "_bins.txt"
+        with open(bins_path, "w", encoding="utf-8") as fh:
+            fh.write(self._spectratools_header(
+                source, norm, float(e.E.min()), float(e.E.max()), int(e.n),
+                a_cal, b_cal, "E  eff_krf  deff_krf  eff_rw  deff_rw",
+                extra_notes=[
+                    "",
+                    "one row per channel, evaluated through the energy "
+                    "calibration above",
+                    "curves interpolated from at most %d knots" % _EXPORT_KNOTS,
+                ]))
+            for E_i, row in zip(E_ch, bins):
+                fh.write("%14.6f %15.8g %15.8g %15.8g %15.8g\n"
+                         % (E_i, row[0], row[1], row[2], row[3]))
+        written.append(bins_path)
+
+        # 3. the same curve at the calibration lines
+        peaks, _ = self._relative_efficiency_curves(np.asarray(e.E, dtype=float))
+        peaks_path = stem + "_peaks.txt"
+        dE = getattr(e, "dE", None)
+        with open(peaks_path, "w", encoding="utf-8") as fh:
+            fh.write(self._spectratools_header(
+                source, norm, float(e.E.min()), float(e.E.max()), int(e.n),
+                a_cal, b_cal, "E  dE  eff_krf  deff_krf  eff_rw  deff_rw"))
+            for i, (E_i, row) in enumerate(zip(np.asarray(e.E, dtype=float),
+                                               peaks)):
+                d = float(dE[i]) if dE is not None else 0.0
+                fh.write("%14.6f %12.6f %15.8g %15.8g %15.8g %15.8g\n"
+                         % (E_i, d, row[0], row[1], row[2], row[3]))
+        written.append(peaks_path)
+        return written
+
     # ── File menu popup ───────────────────────────────────
     def _show_file_popup(self):
         """File menu: Open / Save / Save as / Exit.
@@ -1059,6 +1298,10 @@ class App(tk.Tk):
         m.add_command(label="Save as…",
                       command=self._on_file_save_as,
                       state="normal" if ready else "disabled")
+        m.add_separator()
+        m.add_command(label="Export for SpectraTools…",
+                      command=self._on_export_spectratools,
+                      state="normal" if self.engine.eff_ready else "disabled")
         m.add_separator()
         m.add_command(label="Exit", command=self._on_close)
         x = self._file_btn.winfo_rootx()
@@ -1349,13 +1592,13 @@ class App(tk.Tk):
                 _Tooltip(hint_lbl, tip)
             fr.columnconfigure(1, weight=1)
 
-        _eff_block(lp, "KFR", self.EFF_C, [
+        _eff_block(lp, "KRF", self.EFF_C, [
             ("ε  (MC mean)",  self._eff_val_mc, self.EFF_C,
              "mean of 10k MC refits",   _TIP_EFF_MC),
             ("Δε  (MC σ)",    self._eff_derr,   self.YELLOW,
              "σ of 10k MC refits",      _TIP_DEFF),
             ("ε  (best-fit)", self._eff_val_bf, self.EFF_C,
-             "f_kfr(E₀, *popt)",        _TIP_EFF_BF),
+             "f_krf(E₀, *popt)",        _TIP_EFF_BF),
         ])
         _eff_block(lp, "Radware", self.RAD_C, [
             ("ε  (MC mean)",  self._eff_rw_val_mc, self.RAD_C,
@@ -1630,12 +1873,12 @@ class App(tk.Tk):
         if y_hi <= y_lo:
             y_hi = y_lo + 1.0
 
-        # KFR curve + MC band (clip band to data-relative window)
-        eg_k = f_kfr(E_g, *e.eff_popt) * sc
-        ax.plot(E_g, eg_k, color=self.EFF_C, lw=2, label="KFR")
+        # KRF curve + MC band (clip band to data-relative window)
+        eg_k = f_krf(E_g, *e.eff_popt) * sc
+        ax.plot(E_g, eg_k, color=self.EFF_C, lw=2, label="KRF")
         if e.params_eff is not None and len(e.params_eff) > 0:
             pk = e.params_eff[:N_BAND]
-            band_k = f_kfr(E_g[None, :], pk[:, 0:1], pk[:, 1:2],
+            band_k = f_krf(E_g[None, :], pk[:, 0:1], pk[:, 1:2],
                            pk[:, 2:3], pk[:, 3:4]) * sc
             kl, kh = _band_percentiles(band_k)
             kl = eg_k - e.eff_birge * (eg_k - kl)
@@ -1643,7 +1886,7 @@ class App(tk.Tk):
             kl = np.clip(kl, y_lo * 0.5 - 0.1*y_hi, y_hi * 1.5)
             kh = np.clip(kh, y_lo * 0.5 - 0.1*y_hi, y_hi * 1.5)
             ax.fill_between(E_g, kl, kh, alpha=0.18, color=self.EFF_C,
-                            label=f"KFR 1σ  (B={e.eff_birge:.2f})")
+                            label=f"KRF 1σ  (B={e.eff_birge:.2f})")
 
         # Radware curve + MC band  (5-parameter: C=0, G=15 fixed)
         if e.radware_popt is not None:
@@ -1671,14 +1914,14 @@ class App(tk.Tk):
         ax_r = self.ax_eff_r; ax_r.cla(); self._style_ax(ax_r)
         ax_r.set_ylabel(f"Δε ({y_unit})", color=self.TEXT, fontsize=8)
         ax_r.set_xlabel("E  (keV)", color=self.TEXT, fontsize=9)
-        res_k = (e.eff - f_kfr(E, *e.eff_popt)) * sc
+        res_k = (e.eff - f_krf(E, *e.eff_popt)) * sc
         ax_r.errorbar(E, res_k, yerr=deff, fmt='o', ms=4,
                       color=self.EFF_C, ecolor=self.MUTED, capsize=2, elinewidth=1,
-                      label="KFR")
+                      label="KRF")
         ax_r.axhline(0,                    color=self.EFF_C, lw=1.4, ls="--")
         ax_r.axhline( e.eff_rms * sc,      color=self.EFF_C, lw=0.8, ls=":", alpha=0.7)
         ax_r.axhline(-e.eff_rms * sc,      color=self.EFF_C, lw=0.8, ls=":", alpha=0.7)
-        ax_r.text(0.01, 0.82, f"KFR RMS={e.eff_rms*sc:.4g}",
+        ax_r.text(0.01, 0.82, f"KRF RMS={e.eff_rms*sc:.4g}",
                   transform=ax_r.transAxes, ha="left", fontsize=7, color=self.EFF_C)
         all_res = [res_k]
         if e.radware_popt is not None:
@@ -1834,10 +2077,10 @@ class App(tk.Tk):
         # Report MC health rather than a bare "ready": a run in which most
         # refits failed still yields a best-fit curve and a plausible-looking
         # plot, so silence here would present a weak result as a strong one.
-        warn = (e.mc_kfr_ok < N_MC_EFF // 2) or (e.mc_bad > N_MC_EFF // 10)
+        warn = (e.mc_krf_ok < N_MC_EFF // 2) or (e.mc_bad > N_MC_EFF // 10)
         self._status(
             ("⚠" if warn else "✔")
-            + f"  Calibration ready  |  MC ok: KFR {e.mc_kfr_ok:,}"
+            + f"  Calibration ready  |  MC ok: KRF {e.mc_krf_ok:,}"
             + f", Radware {e.mc_rw_ok:,}  of {N_MC_EFF:,}"
             + (f", {e.mc_bad:,} non-physical" if e.mc_bad else "")
             + (f"  |  Results → {fname}" if fname else ""),
@@ -1850,7 +2093,7 @@ class App(tk.Tk):
         to {datafile_basename}_Res.txt.  Overwrites on each calibration run."""
         e   = self.engine
         base = os.path.splitext(os.path.basename(e.filepath))[0]
-        self._res_file = os.path.join(os.path.dirname(e.filepath),
+        self._res_file = os.path.join(_results_dir_for(e.filepath),
                                       f"{base}_Res.txt")
         now  = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         sep  = "=" * 80
@@ -1889,13 +2132,13 @@ class App(tk.Tk):
         # ── Efficiency calibration parameters ─────────────────────────
         if e.eff_ready:
             a, b, c, d = e.eff_popt
-            out += [dash, "EFFICIENCY CALIBRATION PARAMETERS — KFR", dash, ""]
-            out += ["KFR:  ε(E) = (a·E + b/E) · exp(c·E + d/E)",
+            out += [dash, "EFFICIENCY CALIBRATION PARAMETERS — KRF", dash, ""]
+            out += ["KRF:  ε(E) = (a·E + b/E) · exp(c·E + d/E)",
                     f"  a = {a:.6e}    b = {b:.6e}",
                     f"  c = {c:.6e}    d = {d:.6e}",
                     f"  χ²/ndf = {e.eff_chi2:.4e} / {e.eff_ndf}   "
                     f"Birge = {e.eff_birge:.4f}   RMS = {e.eff_rms:.6e}",
-                    f"  KFR MC fits ok : {len(e.params_eff):,} / {N_MC_EFF:,}",
+                    f"  KRF MC fits ok : {len(e.params_eff):,} / {N_MC_EFF:,}",
                     ""]
             if e.radware_popt is not None:
                 # Deliberately not named a1/a2/… — those already hold the
@@ -1949,11 +2192,11 @@ class App(tk.Tk):
         # ── Fit data: efficiency ε(E) ──────────────────────────────────
         if e.eff_ready:
             has_rw = e.radware_popt is not None
-            hdr = (f"  {'E[keV]':>10}  {'ε_KFR[a.u.]':>14}  "
+            hdr = (f"  {'E[keV]':>10}  {'ε_KRF[a.u.]':>14}  "
                    f"{'ε_Rad[a.u.]':>14}  {'Δε[a.u.]':>14}")
             sep_row = f"  {'─'*10}  {'─'*14}  {'─'*14}  {'─'*14}"
             out += [dash, "FIT DATA  —  efficiency ε(E)", dash, "", hdr, sep_row]
-            eff_fit_k = f_kfr(e.E, *e.eff_popt)
+            eff_fit_k = f_krf(e.E, *e.eff_popt)
             eff_fit_r = (f_radware_5p(e.E, *e.radware_popt) if has_rw
                          else [float("nan")] * e.n)
             for i in range(e.n):
@@ -2080,13 +2323,13 @@ class App(tk.Tk):
         """
         if self._last_eff_query_au is None:
             return None
-        (E_val, kfr_mean, kfr_std, kfr_bf,
+        (E_val, krf_mean, krf_std, krf_bf,
          rw_mean, rw_std, rw_bf) = self._last_eff_query_au
 
         def s(x):
             return float(x * sc) if isinstance(x, float) and np.isfinite(x) else x
 
-        km, ks, kb = s(kfr_mean), s(kfr_std), s(kfr_bf)
+        km, ks, kb = s(krf_mean), s(krf_std), s(krf_bf)
         rm, rs, rb = s(rw_mean),  s(rw_std),  s(rw_bf)
 
         self._eff_val_mc.set(_ns(km))
@@ -2109,7 +2352,7 @@ class App(tk.Tk):
         self.update_idletasks()
 
         try:
-            kfr_mean, kfr_std, kfr_bf, rw_mean, rw_std, rw_bf = \
+            krf_mean, krf_std, krf_bf, rw_mean, rw_std, rw_bf = \
                 self.engine.predict_efficiency(E_val)
         except Exception as exc:
             self._status(f"❌  {exc}", self.RED)
@@ -2117,7 +2360,7 @@ class App(tk.Tk):
 
         # Store raw a.u. results for toggle redraw
         self._last_eff_query_au = (E_val,
-                                   kfr_mean, kfr_std, kfr_bf,
+                                   krf_mean, krf_std, krf_bf,
                                    rw_mean,  rw_std,  rw_bf)
 
         sc, y_unit = self._eff_scale()
@@ -2139,20 +2382,20 @@ class App(tk.Tk):
         self._append_query_to_file(
             f"[{now}]  EFFICIENCY QUERY\n"
             f"  E₀ = {E_val:.4f} keV\n"
-            f"  KFR    ε(MC mean)  = {_ns(kfr_mean, '.6e')} ± {_ns(kfr_std, '.6e')} a.u.\n"
-            f"  KFR    ε(best-fit) = {_ns(kfr_bf, '.6e')} a.u.\n"
+            f"  KRF    ε(MC mean)  = {_ns(krf_mean, '.6e')} ± {_ns(krf_std, '.6e')} a.u.\n"
+            f"  KRF    ε(best-fit) = {_ns(krf_bf, '.6e')} a.u.\n"
             f"  Radware ε(MC mean)  = {_ns(rw_mean, '.6e')} ± {_ns(rw_std, '.6e')} a.u.\n"
             f"  Radware ε(best-fit) = {_ns(rw_bf, '.6e')} a.u.\n\n")
 
-        kfr_part = (f"  KFR={km_d:.4g}±{ks_d:.4g} {y_unit}"
-                    if np.isfinite(kfr_mean) else "  KFR=N/A")
+        krf_part = (f"  KRF={km_d:.4g}±{ks_d:.4g} {y_unit}"
+                    if np.isfinite(krf_mean) else "  KRF=N/A")
         rw_part  = (f"  Rad={rm_d:.4g}±{rs_d:.4g} {y_unit}"
                     if np.isfinite(rw_mean) else "  Rad=N/A")
         self._status(
-            f"✔  ε({E_val:.1f} keV){kfr_part}{rw_part}",
+            f"✔  ε({E_val:.1f} keV){krf_part}{rw_part}",
             self.GREEN)
 
-    def _draw_eff_query(self, E_val, kfr_mean, kfr_std, kfr_bf=None,
+    def _draw_eff_query(self, E_val, krf_mean, krf_std, krf_bf=None,
                         rw_mean=None, rw_std=None, rw_bf=None, scale=1.0):
         """Draw query markers on ax_eff.  All value arguments are in display
         units (already scaled by `scale`).  The MC histogram is scaled here."""
@@ -2162,23 +2405,23 @@ class App(tk.Tk):
         self._eff_q_arts.append(
             ax.axvline(E_val, color=self.YELLOW, lw=1.4, ls="--", alpha=0.8))
 
-        # KFR: only plot when the value is finite
-        kfr_ok = (isinstance(kfr_mean, float) and np.isfinite(kfr_mean)
-                  and isinstance(kfr_std, float) and np.isfinite(kfr_std))
-        if kfr_ok:
+        # KRF: only plot when the value is finite
+        krf_ok = (isinstance(krf_mean, float) and np.isfinite(krf_mean)
+                  and isinstance(krf_std, float) and np.isfinite(krf_std))
+        if krf_ok:
             self._eff_q_arts.append(
-                ax.axhline(kfr_mean, color=self.EFF_C, lw=1.2, ls="--",
+                ax.axhline(krf_mean, color=self.EFF_C, lw=1.2, ls="--",
                            alpha=0.75, zorder=5))
             self._eff_q_arts.append(
-                ax.errorbar([E_val], [kfr_mean], yerr=[kfr_std],
+                ax.errorbar([E_val], [krf_mean], yerr=[krf_std],
                             fmt='D', ms=9, color=self.EFF_C, ecolor=self.YELLOW,
                             capsize=6, capthick=2, elinewidth=2, zorder=9,
-                            label=f"KFR  {kfr_mean:.3g}±{kfr_std:.2g}"))
-            if kfr_bf is not None and np.isfinite(kfr_bf):
+                            label=f"KRF  {krf_mean:.3g}±{krf_std:.2g}"))
+            if krf_bf is not None and np.isfinite(krf_bf):
                 self._eff_q_arts.append(
-                    ax.plot(E_val, kfr_bf, marker='*', ms=12,
+                    ax.plot(E_val, krf_bf, marker='*', ms=12,
                             color=self.EFF_C, zorder=10,
-                            label=f"KFR bf  {kfr_bf:.3g}")[0])
+                            label=f"KRF bf  {krf_bf:.3g}")[0])
         # Radware: horizontal line + square marker
         rw_ok = (rw_mean is not None and isinstance(rw_mean, float)
                  and np.isfinite(rw_mean))
@@ -2205,7 +2448,7 @@ class App(tk.Tk):
             self.ax_eff_r.axvline(E_val, color=self.YELLOW, lw=1.4,
                                   ls=":", alpha=0.8))
 
-        # MC histogram — overlay KFR and Radware distributions (apply scale)
+        # MC histogram — overlay KRF and Radware distributions (apply scale)
         e = self.engine
         _, y_unit = self._eff_scale()
         ax_mc = self.ax_eff_mc; ax_mc.cla(); self._style_ax(ax_mc)
@@ -2230,20 +2473,20 @@ class App(tk.Tk):
         if len(e.params_eff):
             with np.errstate(over="ignore", invalid="ignore", divide="ignore"):
                 p = e.params_eff
-                kfr_mc = f_kfr(float(E_val), p[:, 0], p[:, 1],
+                krf_mc = f_krf(float(E_val), p[:, 0], p[:, 1],
                                p[:, 2], p[:, 3]) * scale
-            kfr_mc_ok = kfr_mc[np.isfinite(kfr_mc)]
+            krf_mc_ok = krf_mc[np.isfinite(krf_mc)]
         else:
-            kfr_mc_ok = np.empty(0)
-        if kfr_ok and len(kfr_mc_ok) > 1:
-            ax_mc.hist(kfr_mc_ok, bins=_mc_bins(kfr_mc_ok),
+            krf_mc_ok = np.empty(0)
+        if krf_ok and len(krf_mc_ok) > 1:
+            ax_mc.hist(krf_mc_ok, bins=_mc_bins(krf_mc_ok),
                        color=self.EFF_C, alpha=0.60,
-                       edgecolor=self.PANEL, linewidth=0.4, label="KFR")
-            ax_mc.axvline(kfr_mean, color=self.EFF_C, lw=2, zorder=5)
-            ax_mc.axvspan(kfr_mean - kfr_std, kfr_mean + kfr_std,
+                       edgecolor=self.PANEL, linewidth=0.4, label="KRF")
+            ax_mc.axvline(krf_mean, color=self.EFF_C, lw=2, zorder=5)
+            ax_mc.axvspan(krf_mean - krf_std, krf_mean + krf_std,
                           alpha=0.18, color=self.EFF_C, zorder=4)
-            if kfr_bf is not None and np.isfinite(kfr_bf):
-                ax_mc.axvline(kfr_bf, color=self.EFF_C, lw=1.6, ls="--", zorder=6)
+            if krf_bf is not None and np.isfinite(krf_bf):
+                ax_mc.axvline(krf_bf, color=self.EFF_C, lw=1.6, ls="--", zorder=6)
             any_hist = True
         if rw_ok and e.params_radware is not None and len(e.params_radware) > 0:
             p = e.params_radware

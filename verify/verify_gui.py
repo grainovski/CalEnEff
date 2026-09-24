@@ -79,18 +79,18 @@ check("energy query reproducible in UI", app._lin_E_mc.get() == e_first,
 # ── efficiency query ────────────────────────────────────────────────────
 app.E_q_var.set("1000")
 app._query_eff()
-au_kfr = app._eff_val_mc.get()
-check("efficiency query filled", au_kfr != "—", f"KFR={au_kfr} a.u.")
+au_krf = app._eff_val_mc.get()
+check("efficiency query filled", au_krf != "—", f"KRF={au_krf} a.u.")
 
 # ── a.u. <-> % toggle (the refactored shared path) ──────────────────────
 t0 = time.time(); app._toggle_pct_mode(); t_tog = time.time() - t0
-pct_kfr = app._eff_val_mc.get()
-check("toggle to % changed value", pct_kfr != au_kfr, f"{au_kfr} -> {pct_kfr} %")
+pct_krf = app._eff_val_mc.get()
+check("toggle to % changed value", pct_krf != au_krf, f"{au_krf} -> {pct_krf} %")
 check("toggle button label flipped", "→ a.u." in app._pct_btn["text"],
       app._pct_btn["text"])
 t0 = time.time(); app._toggle_pct_mode(); t_tog2 = time.time() - t0
-check("toggle back restores a.u.", app._eff_val_mc.get() == au_kfr,
-      f"{app._eff_val_mc.get()} == {au_kfr}")
+check("toggle back restores a.u.", app._eff_val_mc.get() == au_krf,
+      f"{app._eff_val_mc.get()} == {au_krf}")
 print(f"\n  a.u./% toggle: {t_tog*1000:.0f} ms  and  {t_tog2*1000:.0f} ms "
       f"(full efficiency redraw each time)\n", flush=True)
 

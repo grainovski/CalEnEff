@@ -227,7 +227,7 @@ and links to nuclear data databases.</p>
 <h2>Efficiency curve models — illustration</h2>
 <p>The canvas below shows the typical shape of a relative detection
 efficiency curve for a large-volume HPGe detector.
-Both the <strong>KFR model</strong> (solid blue, 4 parameters, used by CalEnEff) and
+Both the <strong>KRF model</strong> (solid blue, 4 parameters, used by CalEnEff) and
 the <strong>Radware/EFFIT model</strong> (dashed orange, 7 parameters) capture the
 same physical behaviour: strong suppression at very low energies due to
 window and dead-layer attenuation, a broad maximum around 200–400 keV where
@@ -270,7 +270,7 @@ Shaded bands: <span style="color:#b08000">&#9632;</span> Ba-133 (53–384 keV),
     ctx.beginPath();ctx.moveTo(xm(E),pt);ctx.lineTo(xm(E),pt+ph);ctx.stroke();
   });
   // Curve data [E,relEff] — representative HPGe shape
-  var kfr=[[46,.22],[60,.31],[80,.52],[100,.70],[150,.91],[200,1.00],[300,.97],[400,.91],[500,.83],[700,.68],[1000,.52],[1500,.37],[2000,.28],[2500,.21],[3000,.16]];
+  var krf=[[46,.22],[60,.31],[80,.52],[100,.70],[150,.91],[200,1.00],[300,.97],[400,.91],[500,.83],[700,.68],[1000,.52],[1500,.37],[2000,.28],[2500,.21],[3000,.16]];
   var rw= [[46,.21],[60,.30],[80,.50],[100,.69],[150,.90],[200,1.00],[300,.96],[400,.89],[500,.81],[700,.65],[1000,.50],[1500,.35],[2000,.26],[2500,.20],[3000,.15]];
   function drawCurve(pts,col,dash){
     ctx.beginPath();ctx.strokeStyle=col;ctx.lineWidth=2.5;
@@ -278,7 +278,7 @@ Shaded bands: <span style="color:#b08000">&#9632;</span> Ba-133 (53–384 keV),
     pts.forEach(function(p,i){i?ctx.lineTo(xm(p[0]),ym(p[1])):ctx.moveTo(xm(p[0]),ym(p[1]));});
     ctx.stroke();ctx.setLineDash([]);
   }
-  drawCurve(kfr,'#0055cc',false);
+  drawCurve(krf,'#0055cc',false);
   drawCurve(rw,'#cc5500',true);
   // Axes
   ctx.strokeStyle='#444';ctx.lineWidth=1.5;ctx.setLineDash([]);
@@ -307,7 +307,7 @@ Shaded bands: <span style="color:#b08000">&#9632;</span> Ba-133 (53–384 keV),
   ctx.strokeStyle='#0055cc';ctx.lineWidth=2.5;ctx.setLineDash([]);
   ctx.beginPath();ctx.moveTo(lx,ly);ctx.lineTo(lx+26,ly);ctx.stroke();
   ctx.fillStyle='#222';ctx.textAlign='left';ctx.font='11px sans-serif';
-  ctx.fillText('KFR model (CalEnEff)',lx+30,ly+4);
+  ctx.fillText('KRF model (CalEnEff)',lx+30,ly+4);
   ctx.strokeStyle='#cc5500';ctx.setLineDash([7,4]);
   ctx.beginPath();ctx.moveTo(lx,ly+20);ctx.lineTo(lx+26,ly+20);ctx.stroke();
   ctx.setLineDash([]);ctx.fillText('Radware / EFFIT',lx+30,ly+24);
@@ -816,11 +816,14 @@ def build_about_html():
   <tr><th>Field</th><th>Value</th></tr>
   <tr><td>Version</td><td>{_VERSION}</td></tr>
   <tr><td>Build date</td><td>{_BUILD_DATE}</td></tr>
-  <tr><td>Author</td><td>grainovski</td></tr>
+  <tr><td>Author</td><td>Georgi Rainovski</td></tr>
+  <tr><td>Copyright</td><td>Copyright © 2026 Georgi Rainovski</td></tr>
   <tr><td>Repository</td><td><a href="{_GITHUB_URL}">{_GITHUB_URL}</a></td></tr>
   <tr><td>Python</td><td>{sys.version}</td></tr>
   <tr><td>Platform</td><td>{sys.platform}</td></tr>
 </table>
+
+<p><em>This application is created using AI Claude Code.</em></p>
 
 <h2>Description</h2>
 <p>CalEnEff is a desktop tool for gamma-ray energy and efficiency calibration

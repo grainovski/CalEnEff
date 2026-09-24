@@ -156,7 +156,7 @@ Description: Gamma-ray energy and efficiency calibration tool
  of gamma-ray detectors using a Ra-226 reference source.
  .
  Features: linear/quadratic energy calibration with Birge-ratio diagnostics,
- four-parameter KFR efficiency model, Monte Carlo uncertainty propagation
+ four-parameter KRF efficiency model, Monte Carlo uncertainty propagation
  (10 000 trials), and browser-based help with a 13-source reference database.
 CTRL
 
