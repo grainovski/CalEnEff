@@ -1,7 +1,7 @@
 # Version is supplied by build_rpm.sh via --define "version X.Y", which reads
 # it from Ra226_Calibration.iss so the whole project has one source of truth.
 # The fallback below only applies when rpmbuild is invoked by hand.
-%{!?version: %define version 4.5}
+%{!?version: %define version 4.6}
 
 Name:           caleneff
 Version:        %{version}
@@ -122,6 +122,14 @@ EOM
 fi
 
 %changelog
+* Wed Sep 24 2026 grainovski <grainovski@googlemail.com> - 4.6-1
+- Internal only, no behaviour change: the SpectraTools export moved out of the
+  GUI class into its own module, spectratools_export.py, so it can be imported
+  and tested without creating a window. The module is now named explicitly in
+  this spec, in build_rpm.sh and in build_deb.sh -- all three install a fixed
+  file list, so a module missing from them ships a package that cannot import
+  it while the Windows build works fine.
+
 * Wed Sep 24 2026 grainovski <grainovski@googlemail.com> - 4.5-1
 - An uncertainty band is never narrowed by a Birge ratio below 1. All four
   plotted 1-sigma bands scaled unconditionally, so a ratio under 1 reported an

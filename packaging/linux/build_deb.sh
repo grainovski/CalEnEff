@@ -112,6 +112,15 @@ chmod 755 "$STAGING/usr/bin/caleneff"
 cat > /tmp/changelog <<EOF
 caleneff (${VER}) stable; urgency=low
 
+  * Internal only, no behaviour change: the SpectraTools export moved out of
+    the GUI class into its own module so it can be tested without a window.
+    That module is now named explicitly in this script, in build_rpm.sh and in
+    caleneff.spec, which all install a fixed file list.
+
+ -- grainovski <grainovski@googlemail.com>  $(date -R)
+
+caleneff (4.5) stable; urgency=low
+
   * An uncertainty band is never narrowed by a Birge ratio below 1. All four
     plotted 1-sigma bands scaled unconditionally, so a ratio under 1 reported
     an interval tighter than the Monte Carlo spread it came from. Bands now
