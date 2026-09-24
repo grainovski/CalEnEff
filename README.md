@@ -94,10 +94,10 @@ Run `CalEnEff_Setup.exe` and launch **CalEnEff** from the Start menu.
 
 ```bash
 # Ubuntu / Debian
-sudo apt install ./caleneff_4.3_all.deb
+sudo apt install ./caleneff_4.4_all.deb
 
 # AlmaLinux / RHEL — installs on a stock system; pulls in epel-release itself
-sudo dnf install ./caleneff-4.3-1.el10.noarch.rpm
+sudo dnf install ./caleneff-4.4-1.el10.noarch.rpm
 # then, only if it reports matplotlib is still missing:
 sudo dnf install -y python3-matplotlib
 

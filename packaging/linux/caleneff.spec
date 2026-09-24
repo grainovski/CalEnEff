@@ -1,7 +1,7 @@
 # Version is supplied by build_rpm.sh via --define "version X.Y", which reads
 # it from Ra226_Calibration.iss so the whole project has one source of truth.
 # The fallback below only applies when rpmbuild is invoked by hand.
-%{!?version: %define version 4.3}
+%{!?version: %define version 4.4}
 
 Name:           caleneff
 Version:        %{version}
@@ -121,6 +121,17 @@ EOM
 fi
 
 %changelog
+* Wed Sep 24 2026 grainovski <grainovski@googlemail.com> - 4.4-1
+- Nothing is written beside the executable any more. An installed copy sits
+  under a directory a standard user cannot write to, so a calibration on the
+  bundled sample could not write its results file at all; dialogs and results
+  now default to the user's Documents folder.
+- Rename the four-parameter model KFR to KRF throughout, matching
+  SpectraTools, which renamed the same model at 6.1.1.
+- New File -> Export for SpectraTools, writing the energy coefficients and
+  the relative efficiency curve in the formats SpectraTools 6.1.1 reads.
+- Copyright to Georgi Rainovski.
+
 * Tue Sep 23 2026 grainovski <grainovski@googlemail.com> - 4.3-1
 - Add a File menu (Open / Save / Save as / Exit) in the top-left corner.
   There was previously no way to save results explicitly, and no way to

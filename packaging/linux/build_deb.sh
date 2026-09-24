@@ -108,6 +108,19 @@ chmod 755 "$STAGING/usr/bin/caleneff"
 cat > /tmp/changelog <<EOF
 caleneff (${VER}) stable; urgency=low
 
+  * Results and file dialogs default to the user's Documents folder. An
+    installed copy sits in a directory a standard user cannot write to, so a
+    calibration on the bundled sample could not write its results at all.
+  * Rename the four-parameter model KFR to KRF throughout, matching
+    SpectraTools, which renamed the same model at 6.1.1.
+  * New File -> Export for SpectraTools, writing the energy coefficients and
+    the relative efficiency curve in the formats SpectraTools 6.1.1 reads.
+  * Copyright to Georgi Rainovski.
+
+ -- grainovski <grainovski@googlemail.com>  $(date -R)
+
+caleneff (4.3) stable; urgency=low
+
   * Add a File menu (Open / Save / Save as / Exit) in the top-left corner.
     Results could previously only be saved to the automatic
     {basename}_Res.txt written by each calibration.
