@@ -3,6 +3,12 @@
 # Build: pyinstaller Ra226_Calibration.spec
 
 import os
+import re
+
+from PyInstaller.utils.win32.versioninfo import (
+    FixedFileInfo, StringFileInfo, StringStruct, StringTable, VarFileInfo,
+    VarStruct, VSVersionInfo,
+)
 
 MC_BIN = r"C:\Users\RIG\miniconda3\Library\bin"
 
@@ -40,6 +46,88 @@ extra_binaries = [
     for dll in _extra_dlls
     if os.path.exists(os.path.join(MC_BIN, dll))
 ]
+
+# ---------------------------------------------------------------------------
+# Windows version resource
+#
+# Without this the built CalEnEff.exe has a blank Details tab in Explorer -- no
+# version, no publisher, no copyright -- even though the INSTALLER carries all
+# three.  Nothing is hardcoded here: the version comes from build_info.py,
+# which build.ps1 stamps from Ra226_Calibration.iss immediately before calling
+# PyInstaller, and the publisher and copyright come from that .iss directly.
+# AppVersion therefore remains the one line to bump.
+#
+# If either file is missing or unreadable -- a bare `pyinstaller
+# Ra226_Calibration.spec` with no build.ps1 run first -- the resource is simply
+# omitted rather than failing the build or, worse, stamping a wrong version.
+# ---------------------------------------------------------------------------
+
+def _read_text(path):
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return fh.read()
+    except OSError:
+        return ""
+
+
+def _iss_field(text, name, default):
+    m = re.search(r"^%s=(.+)$" % re.escape(name), text, re.MULTILINE)
+    return m.group(1).strip() if m else default
+
+
+def _version_quad(version):
+    """'4.7' -> (4, 7, 0, 0).  A version resource needs exactly four ints."""
+    parts = []
+    for piece in str(version).split(".")[:4]:
+        m = re.match(r"\d+", piece)
+        parts.append(int(m.group()) if m else 0)
+    return tuple((parts + [0, 0, 0, 0])[:4])
+
+
+_build_info = _read_text("build_info.py")
+_m = re.search(r'VERSION\s*=\s*"([^"]+)"', _build_info)
+_version = _m.group(1) if _m else ""
+
+if _version:
+    _iss = _read_text("Ra226_Calibration.iss")
+    _publisher = _iss_field(_iss, "AppPublisher", "Georgi Rainovski")
+    _copyright = _iss_field(_iss, "AppCopyright",
+                            "Copyright (c) 2026 Georgi Rainovski")
+    _quad = _version_quad(_version)
+    # 040904B0 = US English (0x0409), Unicode charset (0x04B0 = 1200); the
+    # VarStruct below must name the same pair or Explorer reads no strings.
+    version_resource = VSVersionInfo(
+        ffi=FixedFileInfo(
+            filevers=_quad,
+            prodvers=_quad,
+            mask=0x3F,
+            flags=0x0,
+            OS=0x40004,      # VOS_NT_WINDOWS32
+            fileType=0x1,    # VFT_APP
+            subtype=0x0,
+            date=(0, 0),
+        ),
+        kids=[
+            StringFileInfo([StringTable("040904B0", [
+                StringStruct("CompanyName", _publisher),
+                StringStruct("FileDescription",
+                             "Gamma-ray energy and efficiency calibration"),
+                StringStruct("FileVersion", _version),
+                StringStruct("InternalName", "CalEnEff"),
+                StringStruct("LegalCopyright", _copyright),
+                StringStruct("OriginalFilename", "CalEnEff.exe"),
+                StringStruct("ProductName", "CalEnEff"),
+                StringStruct("ProductVersion", _version),
+            ])]),
+            VarFileInfo([VarStruct("Translation", [0x0409, 1200])]),
+        ],
+    )
+    print("spec: version resource %s (%s)" % (_version, _publisher))
+else:
+    version_resource = None
+    print("spec: no build_info.py VERSION found -- building WITHOUT a version "
+          "resource")
+
 
 a = Analysis(
     ["ra226_gui.py"],
@@ -109,6 +197,9 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     icon="CalEnEff.ico",
+    # None is the documented way to say "no version resource", and is exactly
+    # what this argument defaulted to before.
+    version=version_resource,
 )
 
 coll = COLLECT(
