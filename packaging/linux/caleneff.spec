@@ -1,7 +1,7 @@
 # Version is supplied by build_rpm.sh via --define "version X.Y", which reads
 # it from Ra226_Calibration.iss so the whole project has one source of truth.
 # The fallback below only applies when rpmbuild is invoked by hand.
-%{!?version: %define version 4.6}
+%{!?version: %define version 4.7}
 
 Name:           caleneff
 Version:        %{version}
@@ -148,6 +148,22 @@ if [ "$1" = "0" ]; then
 fi
 
 %changelog
+* Thu Sep 24 2026 grainovski <grainovski@googlemail.com> - 4.7-1
+- Clear stale bytecode on install and upgrade. Neither package removed
+  /usr/share/caleneff/__pycache__, and rpm normalises every installed file's
+  mtime to midnight UTC of the build date, identical for all packages built on
+  the same day. CPython validates a cached .pyc from the recorded (mtime, size)
+  of its source, so for any .py whose size did not change that pair matched and
+  the OLD bytecode was reused: 4.6 installed cleanly over 4.4 and still
+  reported 4.4 in the About box and in the SpectraTools export header. A code
+  fix that happened to leave a file's size unchanged would equally not have
+  taken effect. postun now also removes bytecode it generated, which belongs to
+  no package and was previously orphaned on erase.
+- The Windows executable carries a version resource at last: version,
+  publisher and copyright were blank in its Explorer Details tab, although the
+  installer had carried all three since 4.4. No Linux effect; recorded here so
+  the three packages keep one changelog.
+
 * Wed Sep 24 2026 grainovski <grainovski@googlemail.com> - 4.6-1
 - Internal only, no behaviour change: the SpectraTools export moved out of the
   GUI class into its own module, spectratools_export.py, so it can be imported

@@ -112,6 +112,21 @@ chmod 755 "$STAGING/usr/bin/caleneff"
 cat > /tmp/changelog <<EOF
 caleneff (${VER}) stable; urgency=low
 
+  * Clear stale bytecode on install and upgrade. Neither package removed
+    /usr/share/caleneff/__pycache__. CPython validates a cached .pyc from the
+    recorded (mtime, size) of its source, so an upgrade that leaves a same-size
+    .py with an unchanged mtime keeps running the OLD bytecode. The RPM hit
+    this because rpm normalises mtimes to the build date: 4.6 installed over
+    4.4 and still reported 4.4. The .deb preserves real build mtimes and so
+    escaped it -- by luck, not design. postrm now also removes bytecode
+    postinst generated, which belongs to no package.
+  * The Windows executable carries a version resource at last. No effect here;
+    recorded so the three packages keep one changelog.
+
+ -- grainovski <grainovski@googlemail.com>  $(date -R)
+
+caleneff (4.6) stable; urgency=low
+
   * Internal only, no behaviour change: the SpectraTools export moved out of
     the GUI class into its own module so it can be tested without a window.
     That module is now named explicitly in this script, in build_rpm.sh and in
