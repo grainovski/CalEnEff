@@ -104,6 +104,23 @@ install -m 644 %{_sourcedir}/caleneff.png \
 /usr/share/icons/hicolor/128x128/apps/caleneff.png
 
 %post
+# Drop any bytecode left by a previous version, then recompile.
+#
+# This is not belt-and-braces.  CPython decides a cached .pyc is still valid
+# from the (mtime, size) pair of the source recorded in the .pyc header, and
+# rpm normalises every installed file's mtime to midnight UTC of the BUILD
+# DATE -- identical for every package built on the same day.  So for any .py
+# whose size did not change, that pair is byte-identical between two same-day
+# builds and the OLD bytecode is silently reused.  build_info.py is the
+# guaranteed case (VERSION = "4.6" and VERSION = "4.7" are the same length):
+# 4.6 installed cleanly over 4.4 and still reported 4.4.  A code fix that
+# happens to leave a file's size unchanged would likewise not take effect.
+#
+# The path is written out literally rather than built from a variable: an
+# empty expansion in an rm -rf is not a risk worth taking for brevity.
+rm -rf /usr/share/caleneff/__pycache__
+/usr/bin/python3 -m compileall -q /usr/share/caleneff >/dev/null 2>&1 || true
+
 gtk-update-icon-cache -f -t /usr/share/icons/hicolor 2>/dev/null || true
 update-desktop-database 2>/dev/null || true
 
@@ -119,6 +136,15 @@ if ! /usr/bin/python3 -c 'import matplotlib' >/dev/null 2>&1; then
       sudo dnf install -y python3-matplotlib
 
 EOM
+fi
+
+%postun
+# $1 is the number of versions left: 0 on erase, 1 during an upgrade.  Only
+# the erase case should clean up, and only bytecode we generated in %post --
+# it belongs to no package, so rpm will not remove it for us.
+if [ "$1" = "0" ]; then
+    rm -rf /usr/share/caleneff/__pycache__
+    rmdir /usr/share/caleneff 2>/dev/null || true
 fi
 
 %changelog

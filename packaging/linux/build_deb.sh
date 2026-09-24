@@ -198,13 +198,36 @@ Description: Gamma-ray energy and efficiency calibration tool
 CTRL
 
 # ── DEBIAN/postinst ───────────────────────────────────────────────
+# The __pycache__ removal is the important line.  CPython validates a cached
+# .pyc from the (mtime, size) pair of its source, so an upgrade that leaves a
+# same-size .py with a same mtime keeps running the OLD bytecode.  The .deb
+# preserves real build mtimes and so has not been bitten in practice, unlike
+# the RPM -- but that is luck, not design, and the two packages should not
+# diverge on something this quiet.  See the matching block in caleneff.spec.
 cat > "$STAGING/DEBIAN/postinst" <<'EOF'
 #!/bin/bash
 set -e
+rm -rf /usr/share/caleneff/__pycache__
+python3 -m compileall -q /usr/share/caleneff >/dev/null 2>&1 || true
 gtk-update-icon-cache -f -t /usr/share/icons/hicolor 2>/dev/null || true
 update-desktop-database 2>/dev/null || true
 EOF
 chmod 755 "$STAGING/DEBIAN/postinst"
+
+# ── DEBIAN/postrm ─────────────────────────────────────────────────
+# dpkg removes only the files it installed; the bytecode postinst generated
+# belongs to no package, so without this it is orphaned under /usr/share.
+cat > "$STAGING/DEBIAN/postrm" <<'EOF'
+#!/bin/bash
+set -e
+case "$1" in
+    remove|purge)
+        rm -rf /usr/share/caleneff/__pycache__
+        rmdir /usr/share/caleneff 2>/dev/null || true
+        ;;
+esac
+EOF
+chmod 755 "$STAGING/DEBIAN/postrm"
 
 # ── build .deb ────────────────────────────────────────────────────
 OUT=/tmp/${PKG}_${VER}_${ARCH}.deb
