@@ -112,6 +112,23 @@ chmod 755 "$STAGING/usr/bin/caleneff"
 cat > /tmp/changelog <<EOF
 caleneff (${VER}) stable; urgency=low
 
+  * Query results carry the Birge scaling the plotted bands always had; for an
+    energy query only the calibration's share is scaled, not the user's own
+    channel uncertainty.
+  * Relative efficiency is normalised to the KRF peak inside the fitted range,
+    shared by the % display and the SpectraTools export, which used to
+    disagree by 2.1%.
+  * Queries outside the fitted range are flagged and marked EXTRAPOLATED in the
+    query log; energy queries log the fit's RMS residual.
+  * New example dataset: a real Ra-226 measurement with its own peak-fit
+    uncertainties, and IAEA recommended emission probabilities.
+  * Knowledge Database corrected line by line; Ra-226 caveats on equilibrium,
+    Pb-210 and coincidence summing; the help describes the actual methods.
+
+ -- grainovski <grainovski@googlemail.com>  $(date -R)
+
+caleneff (4.7) stable; urgency=low
+
   * Clear stale bytecode on install and upgrade. Neither package removed
     /usr/share/caleneff/__pycache__. CPython validates a cached .pyc from the
     recorded (mtime, size) of its source, so an upgrade that leaves a same-size

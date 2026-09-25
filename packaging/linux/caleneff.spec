@@ -1,7 +1,7 @@
 # Version is supplied by build_rpm.sh via --define "version X.Y", which reads
 # it from Ra226_Calibration.iss so the whole project has one source of truth.
 # The fallback below only applies when rpmbuild is invoked by hand.
-%{!?version: %define version 4.7}
+%{!?version: %define version 4.8}
 
 Name:           caleneff
 Version:        %{version}
@@ -148,6 +148,23 @@ if [ "$1" = "0" ]; then
 fi
 
 %changelog
+* Fri Sep 25 2026 grainovski <grainovski@googlemail.com> - 4.8-1
+- Query results carry the Birge scaling the plotted bands always had; they
+  used to report the unscaled Monte Carlo spread. For an energy query only the
+  calibration's share is scaled, never the user's own channel uncertainty.
+- Relative efficiency is normalised to the KRF peak inside the fitted range,
+  one number shared by the %% display and the SpectraTools export. Both used
+  extrapolated maxima before and disagreed with each other by 2.1%%.
+- Queries outside the fitted range are flagged in the status bar and marked
+  EXTRAPOLATED in the query log; energy queries log the fit's RMS residual.
+- New example dataset: a real Ra-226 measurement with its own peak-fit
+  uncertainties, and emission probabilities from the IAEA recommended
+  standards. The previous file mixed evaluations (up to 16%% wrong) and had
+  uncertainties far below their physical minimums.
+- Knowledge Database corrected line by line (58 values, 4 non-existent lines
+  removed); Ra-226 caveats on radon equilibrium, Pb-210 and coincidence
+  summing; the help now describes the methods the app actually uses.
+
 * Thu Sep 24 2026 grainovski <grainovski@googlemail.com> - 4.7-1
 - Clear stale bytecode on install and upgrade. Neither package removed
   /usr/share/caleneff/__pycache__, and rpm normalises every installed file's
