@@ -191,10 +191,13 @@ _TIP_E_MC = (
     "distribution, then inverts ch(E) to find E."
 )
 _TIP_DE = (
-    "MC 1σ uncertainty: standard deviation of the\n"
-    "10,000 MC energy samples.\n"
+    "1σ uncertainty from 10,000 MC energy samples.\n"
     "Includes both channel measurement noise and\n"
-    "calibration parameter uncertainty."
+    "calibration parameter uncertainty; the calibration\n"
+    "share is multiplied by the Birge ratio when B > 1.\n\n"
+    "This assumes the fit residuals are random.  If they\n"
+    "form a smooth pattern, the calibration's real error\n"
+    "is nearer the fit's RMS residual (in the query log)."
 )
 _TIP_E_BF = (
     "Best-fit energy: direct inversion of the best-fit\n"
@@ -214,7 +217,8 @@ _TIP_DEFF = (
     "KRF MC 1σ uncertainty on ε:\n"
     "Standard deviation of ε over 10,000 refits of the\n"
     "KRF function, each with N and I resampled from\n"
-    "their stated Gaussian uncertainties."
+    "their stated Gaussian uncertainties, multiplied by\n"
+    "the KRF Birge ratio when B > 1 -- as the band is."
 )
 _TIP_EFF_BF = (
     "KRF best-fit efficiency: f_krf(E₀, *popt)\n"
@@ -233,7 +237,8 @@ _TIP_RAD_MC = (
 _TIP_RAD_DEFF = (
     "Radware MC 1σ uncertainty on ε:\n"
     "Standard deviation of ε over MC refits of the\n"
-    "5-parameter Radware function (C=0, G=15 fixed).\n"
+    "5-parameter Radware function (C=0, G=15 fixed),\n"
+    "multiplied by the Radware Birge ratio when B > 1.\n"
     "Each iteration uses a fresh parset() seed\n"
     "from the resampled data — Radford's procedure."
 )
@@ -304,6 +309,42 @@ def _band_scale(birge):
     except (TypeError, ValueError):
         return 1.0
     return b if b > 1.0 else 1.0
+
+
+def _inflate_calibration_part(total, cal, B):
+    """Inflate only the calibration share of a Monte Carlo spread by B.
+
+    A query's MC spread mixes two independent sources: the calibration's own
+    parameter uncertainty (cal) and the uncertainty of the queried value itself
+    (e.g. the channel's Δch).  A Birge ratio says the CALIBRATION's stated σ
+    were too small; it says nothing about the user's Δch, so scaling the total
+    would inflate the user's own measurement too.  In variances:
+
+        σ² = σ_total² + (B² − 1)·σ_cal²
+
+    which is σ_total when B = 1 and B·σ_cal when the query adds nothing.
+    """
+    if not (np.isfinite(total) and np.isfinite(cal)):
+        return total
+    return float(np.sqrt(total * total + (B * B - 1.0) * cal * cal))
+
+
+def _curve_peak_in_range(func, E_lo, E_hi, n=4000):
+    """(value, energy) of the maximum of func over [E_lo, E_hi] -- the data.
+
+    Never outside it: a relative efficiency normalised to an extrapolated
+    value inherits the extrapolation's arbitrariness.  Returns (1.0, nan) if
+    the curve has no finite positive value there, so a caller dividing by the
+    result cannot divide by zero.
+    """
+    E = np.linspace(float(E_lo), float(E_hi), int(n))
+    with np.errstate(over="ignore", invalid="ignore", divide="ignore"):
+        v = np.asarray(func(E), dtype=float)
+    ok = np.isfinite(v) & (v > 0)
+    if not ok.any():
+        return 1.0, float("nan")
+    k = int(np.argmax(np.where(ok, v, -np.inf)))
+    return float(v[k]), float(E[k])
 
 
 def _birge(chi2, ndf):
@@ -707,9 +748,11 @@ class CalibrationEngine:
         self.params_radware = None
         self.radware_rms    = self.radware_birge = None
         self.radware_chi2   = self.radware_ndf   = None
-        # Normalization factor for % mode: eff_norm = 100 / max(KRF curve)
-        # Multiply any a.u. value by eff_norm to convert to %.
+        # Normalisation, shared by % mode and the SpectraTools export: the peak
+        # of the best-fit KRF curve WITHIN the fitted energy range (eff_peak,
+        # reached at eff_peak_E).  eff_norm = 100 / eff_peak converts a.u. to %.
         self.eff_norm   = None
+        self.eff_peak   = self.eff_peak_E = None
         self.eff_ready  = False
         self.mc_krf_ok  = self.mc_rw_ok = self.mc_bad = 0
 
@@ -847,13 +890,17 @@ class CalibrationEngine:
         self.eff_chi2  = float(np.sum((res_k/deff)**2))
         self.eff_birge = _birge(self.eff_chi2, self.eff_ndf)
 
-        # Normalization factor: 100 / peak(KRF curve) for % display mode
-        _E_fine = np.linspace(max(self.E.min() * 0.9, 1.0),
-                               self.E.max() * 1.1, 2000)
-        _eff_fine = f_krf(_E_fine, *popt_krf)
-        _eff_ok   = _eff_fine[np.isfinite(_eff_fine) & (_eff_fine > 0)]
-        _peak = float(np.max(_eff_ok)) if len(_eff_ok) > 0 else 1.0
-        self.eff_norm = 100.0 / max(_peak, 1e-30)
+        # Normalisation: the KRF peak WITHIN the fitted range.  It used to be
+        # the maximum over 0.9*Emin .. 1.1*Emax, and on a curve still rising at
+        # the lowest calibration line -- the usual case above ~150 keV -- that
+        # maximum sat on the grid's lower edge: an extrapolated value fixed by
+        # an arbitrary 0.9.  The SpectraTools export took a different
+        # extrapolated maximum again, so one curve read 2.1% differently in the
+        # app and in SpectraTools.  Both now use this single number.
+        self.eff_peak, self.eff_peak_E = _curve_peak_in_range(
+            lambda x: f_krf(x, *popt_krf),
+            float(self.E.min()), float(self.E.max()))
+        self.eff_norm = 100.0 / self.eff_peak
 
         # ── Radware best-fit — 5-parameter (Radford's procedure) ────────
         # Radford's effit.c fixes C (a3) = 0 and G = 15, leaving 5 free
@@ -984,6 +1031,20 @@ class CalibrationEngine:
         self.eff_ready  = True
         if progress_cb: progress_cb(100, "Efficiency calibration done.")
 
+    def energy_outside_fit(self, E_val):
+        """True if E_val lies outside the energies the efficiency was fitted to.
+
+        Inside that range a query interpolates between calibration lines;
+        outside it the answer is model extrapolation, which KRF and Radware can
+        disagree about by orders of magnitude a few tens of keV beyond the
+        data.
+        """
+        return not (float(self.E.min()) <= float(E_val) <= float(self.E.max()))
+
+    def channel_outside_fit(self, ch_val):
+        """True if ch_val lies outside the channels the energy fit used."""
+        return not (float(self.ch.min()) <= float(ch_val) <= float(self.ch.max()))
+
     def predict_efficiency(self, E_val):
         """Evaluate both efficiency models and their MC spread at E₀.
 
@@ -991,6 +1052,11 @@ class CalibrationEngine:
         KRF's exp(d/E) overflows for large d/E, Radware's log-polynomial
         diverges — so non-finite MC samples are filtered out, and fewer than
         10 survivors is reported as NaN rather than as a meaningless σ.
+
+        The returned σ are each model's MC spread multiplied by its own Birge
+        ratio, inflate-only -- the same factor the plotted bands use.  They
+        used to be the unscaled spread, so a query disagreed with the band
+        drawn through the very same energy.
         """
         E = float(E_val)
 
@@ -1001,6 +1067,7 @@ class CalibrationEngine:
                 p = self.params_eff
                 v_k = f_krf(E, p[:, 0], p[:, 1], p[:, 2], p[:, 3])
                 krf_mean, krf_std = _finite_mean_std(v_k, min_n=10)
+                krf_std *= _band_scale(self.eff_birge)
             else:
                 krf_mean = krf_std = float("nan")
             krf_bf_raw = float(f_krf(E, *self.eff_popt))
@@ -1014,6 +1081,7 @@ class CalibrationEngine:
                 v_r = f_radware_5p(E, p[:, 0], p[:, 1], p[:, 2],
                                    p[:, 3], p[:, 4])
                 rw_mean, rw_std = _finite_mean_std(v_r, min_n=10)
+                rw_std *= _band_scale(self.radware_birge)
             if self.radware_popt is not None:
                 rw_bf_raw = float(f_radware_5p(E, *self.radware_popt))
                 rw_bf = rw_bf_raw if np.isfinite(rw_bf_raw) else float("nan")
@@ -1025,6 +1093,12 @@ class CalibrationEngine:
         Seeded from SEED so re-querying the same channel reproduces the same
         numbers: every query is appended to the _Res.txt log, and two identical
         queries disagreeing there would be indistinguishable from a real change.
+
+        The returned σ inflate the calibration's share of the spread by its
+        Birge ratio (see _inflate_calibration_part) and leave the query's own
+        Δch alone.  They used to be the unscaled spread, which on a dataset
+        with B1 = 3345 reported a few 1e-5 keV for a calibration whose
+        residuals were a few tenths of a keV.
         """
         rng  = np.random.default_rng(SEED)
         ch_m = rng.normal(ch_val, dch_val, N_MC_PRED)
@@ -1044,8 +1118,19 @@ class CalibrationEngine:
         El_bf = float(El_bf) if np.isfinite(El_bf) else float("nan")
         Eq_bf = float(_invert_quadratic(*self.popt2, ch_val, El_bf))
 
-        return (*_finite_mean_std(E_lin), *_finite_mean_std(E_quad),
-                El_bf, Eq_bf)
+        # The same parameter samples at the exact channel: the spread of these
+        # is the calibration's share alone, with the query's Δch taken out.
+        with np.errstate(divide="ignore", invalid="ignore"):
+            E_lin_cal = (ch_val - a1) / b1
+        E_quad_cal = _invert_quadratic(pq[:, 0], pq[:, 1], pq[:, 2],
+                                       ch_val, E_lin_cal)
+        El, sl = _finite_mean_std(E_lin)
+        Eq, sq = _finite_mean_std(E_quad)
+        sl = _inflate_calibration_part(sl, _finite_mean_std(E_lin_cal)[1],
+                                       _band_scale(self.birge1))
+        sq = _inflate_calibration_part(sq, _finite_mean_std(E_quad_cal)[1],
+                                       _band_scale(self.birge2))
+        return El, sl, Eq, sq, El_bf, Eq_bf
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -2139,6 +2224,14 @@ class App(tk.Tk):
             self.btn_calc.config(state="normal"); return
 
         El, dEl, Eq, dEq, El_bf, Eq_bf = res
+        e = self.engine
+        extrap = e.channel_outside_fit(ch_val)
+        # The fit's RMS residual, in keV: what the calibration is actually
+        # accurate to.  Birge scaling assumes random residuals and can be well
+        # below this when the residuals follow a smooth pattern.
+        rms_lin = e.rms1 / e.popt1[1]
+        _slope_q = e.popt2[1] + 2.0 * e.popt2[2] * (Eq_bf if np.isfinite(Eq_bf) else El_bf)
+        rms_quad = e.rms2 / _slope_q if _slope_q else float("nan")
         self._set("lin",  "E_mc", f"{El:.4f}")
         self._set("lin",  "dE",   f"±{dEl:.4f}")
         self._set("lin",  "E_bf", f"{El_bf:.4f}" if not np.isnan(El_bf) else "—")
@@ -2155,19 +2248,33 @@ class App(tk.Tk):
         now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         El_bf_str = f"{El_bf:.4f}" if not np.isnan(El_bf) else "—"
         Eq_bf_str = f"{Eq_bf:.4f}" if not np.isnan(Eq_bf) else "—"
+        rng_note = (f"  ⚠ EXTRAPOLATED: ch₀ is outside the fitted channel range "
+                    f"{e.ch.min():.2f}–{e.ch.max():.2f}\n") if extrap else ""
         self._append_query_to_file(
             f"[{now}]  ENERGY QUERY\n"
             f"  ch₀ = {ch_val:.4f}   Δch₀ = {dch_val:.4f}\n"
+            f"{rng_note}"
             f"  Linear:    E(MC mean) = {El:.4f} ± {dEl:.4f} keV"
             f"   E(best-fit) = {El_bf_str} keV\n"
             f"  Quadratic: E(MC mean) = {Eq:.4f} ± {dEq:.4f} keV"
-            f"   E(best-fit) = {Eq_bf_str} keV\n\n")
+            f"   E(best-fit) = {Eq_bf_str} keV\n"
+            f"  σ: calibration share × Birge (B1={e.birge1:.4g}, B2={e.birge2:.4g})."
+            f"  Fit RMS residual ≈ {rms_lin:.4f} keV (lin), "
+            f"{rms_quad:.4f} keV (quad)\n\n")
 
-        self._status(
-            f"✔  ch={ch_val:.1f}±{dch_val}  →  "
-            f"E(lin)={El:.3f}±{dEl:.3f} keV   "
-            f"E(quad)={Eq:.3f}±{dEq:.3f} keV",
-            self.GREEN)
+        if extrap:
+            self._status(
+                f"⚠  ch={ch_val:.1f} is OUTSIDE the fitted range "
+                f"{e.ch.min():.0f}–{e.ch.max():.0f} — extrapolated:  "
+                f"E(lin)={El:.3f}±{dEl:.3f} keV   "
+                f"E(quad)={Eq:.3f}±{dEq:.3f} keV",
+                self.YELLOW)
+        else:
+            self._status(
+                f"✔  ch={ch_val:.1f}±{dch_val}  →  "
+                f"E(lin)={El:.3f}±{dEl:.3f} keV   "
+                f"E(quad)={Eq:.3f}±{dEq:.3f} keV",
+                self.GREEN)
 
     def _draw_query(self, ch_val, dch_val, El, dEl, Eq, dEq):
         self._remove_arts(self._q_arts); self._q_arts.clear()
@@ -2272,22 +2379,35 @@ class App(tk.Tk):
             self.btn_eff_query.config(state="normal")
 
         # Append query to result file (always a.u. values in file)
+        e = self.engine
+        extrap = e.energy_outside_fit(E_val)
+        rng_note = (f"  ⚠ EXTRAPOLATED: E₀ is outside the fitted range "
+                    f"{e.E.min():.2f}–{e.E.max():.2f} keV\n") if extrap else ""
         now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         self._append_query_to_file(
             f"[{now}]  EFFICIENCY QUERY\n"
             f"  E₀ = {E_val:.4f} keV\n"
+            f"{rng_note}"
             f"  KRF    ε(MC mean)  = {_ns(krf_mean, '.6e')} ± {_ns(krf_std, '.6e')} a.u.\n"
             f"  KRF    ε(best-fit) = {_ns(krf_bf, '.6e')} a.u.\n"
             f"  Radware ε(MC mean)  = {_ns(rw_mean, '.6e')} ± {_ns(rw_std, '.6e')} a.u.\n"
-            f"  Radware ε(best-fit) = {_ns(rw_bf, '.6e')} a.u.\n\n")
+            f"  Radware ε(best-fit) = {_ns(rw_bf, '.6e')} a.u.\n"
+            f"  σ: MC spread × each model's Birge ratio, inflate-only\n\n")
 
         krf_part = (f"  KRF={km_d:.4g}±{ks_d:.4g} {y_unit}"
                     if np.isfinite(krf_mean) else "  KRF=N/A")
         rw_part  = (f"  Rad={rm_d:.4g}±{rs_d:.4g} {y_unit}"
                     if np.isfinite(rw_mean) else "  Rad=N/A")
-        self._status(
-            f"✔  ε({E_val:.1f} keV){krf_part}{rw_part}",
-            self.GREEN)
+        if extrap:
+            self._status(
+                f"⚠  E={E_val:.1f} keV is OUTSIDE the fitted range "
+                f"{e.E.min():.0f}–{e.E.max():.0f} keV — extrapolated:"
+                f"{krf_part}{rw_part}",
+                self.YELLOW)
+        else:
+            self._status(
+                f"✔  ε({E_val:.1f} keV){krf_part}{rw_part}",
+                self.GREEN)
 
     def _draw_eff_query(self, E_val, krf_mean, krf_std, krf_bf=None,
                         rw_mean=None, rw_std=None, rw_bf=None, scale=1.0):

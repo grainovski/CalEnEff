@@ -1,12 +1,14 @@
 """Engine test suite -- headless, no display required.
 
-28 checks over CalibrationEngine: the numerically stable quadratic inversion,
+40 checks over CalibrationEngine: the numerically stable quadratic inversion,
 input-file validation, a full 10 000-iteration calibration, Monte Carlo
-reproducibility, the empty-MC guard, and the vectorised confidence bands.
+reproducibility, the empty-MC guard, the vectorised confidence bands, and --
+since the 2026-09-24 scientific audit -- in-range normalisation, Birge-scaled
+query uncertainties and the extrapolation flags.
 
-    python verify/verify_v4.py        # expect 28 PASS, "ALL CHECKS PASSED"
+    python verify/verify_v4.py        # expect 40 PASS, "ALL CHECKS PASSED"
 
-Count the PASS lines, not the verdict: fewer than 28 means an incomplete
+Count the PASS lines, not the verdict: fewer than 40 means an incomplete
 environment, not a healthy project.  Exits non-zero on any failure.
 
 If your console is not UTF-8, run with PYTHONIOENCODING=utf-8 PYTHONUTF8=1 --
@@ -153,6 +155,68 @@ print(f"\n  band build: loop {t_loop*1000:.1f} ms  ->  vectorised {t_vec*1000:.1
 # ── 8. _birge guard ──────────────────────────────────────────────────────
 check("_birge ndf=0 -> 1.0", G._birge(5.0, 0) == 1.0)
 check("_birge normal", abs(G._birge(8.0, 2) - 2.0) < 1e-12)
+
+# ── 9. Normalisation is taken inside the data (audit 2026-09-24) ─────────
+check("eff_peak lies inside the fitted range",
+      eng.E.min() <= eng.eff_peak_E <= eng.E.max(),
+      f"peak at {eng.eff_peak_E:.1f} keV, data {eng.E.min():.1f}-{eng.E.max():.1f} keV")
+check("eff_norm == 100 / eff_peak", abs(eng.eff_norm * eng.eff_peak - 100.0) < 1e-9)
+_v, _Ep = G._curve_peak_in_range(lambda x: 1e6 - (x - 500.0) ** 2, 100.0, 900.0)
+check("peak finder: interior maximum", abs(_Ep - 500.0) < 0.5, f"{_Ep:.2f} keV")
+_v, _Ep = G._curve_peak_in_range(lambda x: 1.0 / x, 186.2, 2447.7)
+check("peak finder: stops at the data edge, never beyond", _Ep == 186.2, f"{_Ep} keV")
+
+import spectratools_export as X
+_Ein = np.linspace(eng.E.min(), eng.E.max(), 300)
+_cur, _norm = X.relative_efficiency_curves(eng, _Ein)
+check("export and % mode share one normalisation",
+      abs(_norm - 1.0 / eng.eff_peak) < 1e-15, f"1/{eng.eff_peak:.6g}")
+check("exported curve peaks at 1 inside the fitted range",
+      abs(np.nanmax(_cur[:, 0]) - 1.0) < 0.01, f"max {np.nanmax(_cur[:, 0]):.5f}")
+
+# ── 10. Query sigmas carry the Birge factor (audit 2026-09-24) ───────────
+check("CONTROL: Birge ratios > 1 here, so the checks below discriminate",
+      eng.eff_birge > 1.0 and eng.birge1 > 1.0,
+      f"KRF B={eng.eff_birge:.3f}  energy B1={eng.birge1:.1f}")
+_raw = G.f_krf(1000.0, *eng.params_eff.T)
+_raw_std = float(np.std(_raw[np.isfinite(_raw)]))
+_pe = eng.predict_efficiency(1000.0)
+check("efficiency query sigma = MC spread x Birge",
+      abs(_pe[1] - _raw_std * G._band_scale(eng.eff_birge)) < 1e-9 * _raw_std,
+      f"{_pe[1]:.5g} = {_raw_std:.5g} x {G._band_scale(eng.eff_birge):.4f}")
+
+# Replicate predict()'s own draws at dch = 0: the whole spread is calibration.
+_rng = np.random.default_rng(G.SEED)
+_rng.normal(2000.0, 0.0, G.N_MC_PRED)
+_idx = _rng.integers(0, G.N_MC_CAL, G.N_MC_PRED)
+_pl = eng.params_lin[_idx]
+_cal = float(np.std((2000.0 - _pl[:, 0]) / _pl[:, 1]))
+_r0 = eng.predict(2000.0, 0.0)
+check("energy query sigma (dch=0) = B1 x calibration spread",
+      abs(_r0[1] - G._band_scale(eng.birge1) * _cal) < 1e-9 * max(_r0[1], 1e-12),
+      f"{_r0[1]:.6g} keV = {G._band_scale(eng.birge1):.4g} x {_cal:.4g}")
+# With a large dch, the user's own uncertainty must NOT be inflated by B1.
+_dch = 5.0
+_expect = float(np.hypot(G._band_scale(eng.birge1) * _cal, _dch / eng.popt1[1]))
+_r5 = eng.predict(2000.0, _dch)
+check("energy query: the query's own dch is not Birge-inflated",
+      abs(_r5[1] / _expect - 1.0) < 0.03,
+      f"{_r5[1]:.4f} keV vs {_expect:.4f} expected "
+      f"(inflating dch too would give ~{G._band_scale(eng.birge1) * _dch / eng.popt1[1]:.4g})")
+
+# ── 11. Range flags (audit 2026-09-24) ───────────────────────────────────
+check("energy_outside_fit: inside/edges False, beyond True",
+      not eng.energy_outside_fit(1000.0)
+      and not eng.energy_outside_fit(eng.E.min())
+      and not eng.energy_outside_fit(eng.E.max())
+      and eng.energy_outside_fit(eng.E.min() - 0.01)
+      and eng.energy_outside_fit(eng.E.max() + 0.01))
+check("channel_outside_fit: inside/edges False, beyond True",
+      not eng.channel_outside_fit(2000.0)
+      and not eng.channel_outside_fit(eng.ch.min())
+      and not eng.channel_outside_fit(eng.ch.max())
+      and eng.channel_outside_fit(eng.ch.min() - 0.01)
+      and eng.channel_outside_fit(eng.ch.max() + 0.01))
 
 print("\n" + ("ALL CHECKS PASSED" if not fails else f"FAILURES: {fails}"))
 sys.exit(1 if fails else 0)

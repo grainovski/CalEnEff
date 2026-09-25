@@ -62,8 +62,14 @@ def relative_efficiency_curves(engine, energies):
     every energy: doing that once per channel takes minutes on a 16k spectrum.
     SpectraTools writes its own files the same way and for the same reason.
 
-    Normalised so the applied (KRF) curve peaks at 1, which is what "relative
-    efficiency" means in that format.
+    Normalised so the applied (KRF) curve peaks at 1 WITHIN THE FITTED RANGE,
+    which is what "relative efficiency" means in that format -- by
+    engine.eff_peak, the very number the app's % mode uses, so the two agree.
+    Outside the fitted range the curve is extrapolated and may exceed 1.
+
+    The deff columns are each model's MC spread times its own Birge ratio,
+    inflate-only (predict_efficiency applies it), matching the files
+    SpectraTools writes itself.
     """
     E = np.asarray(energies, dtype=float)
     if E.size <= EXPORT_KNOTS:
@@ -73,9 +79,13 @@ def relative_efficiency_curves(engine, energies):
     cols = np.array([engine.predict_efficiency(k) for k in knots])
     # columns of predict_efficiency: krf_mean, krf_std, _, rw_mean, rw_std, _
     picked = cols[:, [0, 1, 3, 4]]
-    peak = np.nanmax(picked[:, 0])
-    if not np.isfinite(peak) or peak <= 0:
-        raise ValueError("the KRF curve has no positive peak to normalise to")
+    # NOT the maximum over the export's own energies: those run from about
+    # 0 keV to the top channel, so that maximum was an extrapolated hump below
+    # the data (137 keV on the shipped set) and disagreed with the app by 2.1%.
+    peak = getattr(engine, "eff_peak", None)
+    if peak is None or not np.isfinite(peak) or peak <= 0:
+        raise ValueError("the KRF curve has no positive peak in the fitted "
+                         "range to normalise to")
     picked = picked / peak
     if knots is E:
         out = picked
@@ -99,12 +109,19 @@ def header(engine, source_name, norm, e_lo, e_hi, npeaks,
         "SpectraTools relative efficiency",
         "",
         "applied model      : KRF",
-        "normalisation      : %.6g   (1 / peak of the applied curve)" % norm,
+        "normalisation      : %.6g   (1 / peak of the applied curve within "
+        "the fitted range, at %.1f keV)" % (norm, e.eff_peak_E),
         "fitted energy range: %.4f .. %.4f keV" % (e_lo, e_hi),
         "peaks              : %d" % npeaks,
         "KRF  params        : %s" % ", ".join("%.12g" % v for v in e.eff_popt),
         "KRF  chi2/ndf      : %.6f / %d   Birge %.4f   RMS %.6g"
         % (e.eff_chi2, e.eff_ndf, e.eff_birge, e.eff_rms),
+        # SpectraTools' own wording, so a file read on its own says which
+        # factor the deff columns carry -- including when it is 1 because
+        # the ratio was below 1.
+        "band scaling       : x%.4f   (Birge %.4f, inflate-only: a ratio "
+        "below 1 never narrows the band)"
+        % (max(1.0, e.eff_birge), e.eff_birge),
     ]
     if rw is None or not len(rw):
         lines.append("Radware            : did not converge")

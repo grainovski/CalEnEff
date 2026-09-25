@@ -1,11 +1,12 @@
 """GUI test suite -- drives the real Tk widgets end to end.
 
-24 checks: load (including rejection of a malformed file), a full calibration
+31 checks: load (including rejection of a malformed file), a full calibration
 through the button handler, energy and efficiency queries, the a.u./% toggle,
-the theme switch, extrapolated queries that must not crash the plot, clear,
-and the contents of the generated results file.
+the theme switch, extrapolated queries that must not crash the plot AND must
+be flagged (with in-range controls that must not be), % mode reading 100 at
+the in-range peak, clear, and the contents of the generated results file.
 
-    python verify/verify_gui.py       # expect 24 PASS, "ALL GUI CHECKS PASSED"
+    python verify/verify_gui.py       # expect 31 PASS, "ALL GUI CHECKS PASSED"
 
 Needs a display: it really does construct the App (withdrawn, so nothing
 appears on screen).  Takes ~90 s -- it runs two real calibrations.
@@ -71,6 +72,7 @@ check("status reports MC health", "MC ok" in app.status_lbl["text"],
 app.ch_var.set("2000"); app.dch_var.set("0.5")
 app._calculate()
 e_first = app._lin_E_mc.get()
+_st_in_ch = app.status_lbl["text"]
 check("energy query filled", e_first != "—", f"E_lin={e_first}")
 app._calculate()
 check("energy query reproducible in UI", app._lin_E_mc.get() == e_first,
@@ -81,6 +83,7 @@ app.E_q_var.set("1000")
 app._query_eff()
 au_krf = app._eff_val_mc.get()
 check("efficiency query filled", au_krf != "—", f"KRF={au_krf} a.u.")
+_st_in_E = app.status_lbl["text"]
 
 # ── a.u. <-> % toggle (the refactored shared path) ──────────────────────
 t0 = time.time(); app._toggle_pct_mode(); t_tog = time.time() - t0
@@ -108,6 +111,24 @@ for Ev in ("1", "50000"):
     except Exception as ex:
         ok = False; msg = repr(ex)
     check(f"query E={Ev} keV no crash", ok, msg)
+    check(f"query E={Ev} keV flagged as extrapolated",
+          "OUTSIDE" in app.status_lbl["text"], app.status_lbl["text"][:70])
+check("CONTROL: in-range efficiency query NOT flagged", "OUTSIDE" not in _st_in_E,
+      _st_in_E[:60])
+
+app.ch_var.set("99999"); app.dch_var.set("0.5"); app._calculate()
+check("out-of-range energy query flagged", "OUTSIDE" in app.status_lbl["text"],
+      app.status_lbl["text"][:70])
+check("CONTROL: in-range energy query NOT flagged", "OUTSIDE" not in _st_in_ch,
+      _st_in_ch[:60])
+
+# % mode reads exactly 100 at the in-range peak it is normalised to
+app._toggle_pct_mode()
+app.E_q_var.set(f"{app.engine.eff_peak_E:.6f}"); app._query_eff()
+_bf_pct = float(app._eff_val_bf.get())
+check("% mode = 100 at the in-range peak", abs(_bf_pct - 100.0) < 1e-3,
+      f"{_bf_pct} % at {app.engine.eff_peak_E:.1f} keV")
+app._toggle_pct_mode()
 
 # ── clear ───────────────────────────────────────────────────────────────
 app._clear_all()
@@ -123,6 +144,9 @@ if app._res_file and os.path.isfile(app._res_file):
     check("results file has Radware block", "Radware (5-param" in txt)
     check("results file logged queries", txt.count("ENERGY QUERY") >= 1,
           f"{txt.count('ENERGY QUERY')} energy, {txt.count('EFFICIENCY QUERY')} eff")
+    # three out-of-range queries were made (E=1, E=50000, ch=99999)
+    check("log marks exactly the extrapolated queries",
+          txt.count("EXTRAPOLATED") == 3, f"{txt.count('EXTRAPOLATED')} marked")
 
 app.destroy()
 print("\n" + ("ALL GUI CHECKS PASSED" if not fails else f"FAILURES: {fails}"))
