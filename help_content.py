@@ -352,15 +352,25 @@ check and reports the skipped count in the status bar.</p>
 
 Quadratic :  c(E) = a + b·E + d·E²</div>
 <p>where <em>a</em> (offset), <em>b</em> (gain), and <em>d</em> (curvature)
-are the fit parameters. The linear model is adequate for most modern
-ADC/MCA systems; the quadratic term corrects for detector non-linearity.</p>
+are the fit parameters. The linear model is usually adequate for identifying
+peaks; the quadratic term corrects a smooth curvature. Neither can follow the
+small-scale integral non-linearity of an ADC: if the residual plot shows a
+wavy pattern rather than random scatter, the calibration is only as accurate
+as its RMS residual (logged with every energy query), whatever the parameter
+uncertainties say.</p>
 
 <h3>Weighted least-squares fitting</h3>
 <p>The fit minimises the weighted chi-squared:</p>
 <div class='formula'>χ² = Σᵢ  [ cᵢ − c(Eᵢ) ]²  /  σᵢ²
 
-where   σᵢ = σ(cᵢ)    (centroid uncertainty; nuclear energy uncertainty
-                        is negligible for standard calibration sources)</div>
+where   σᵢ = σ(cᵢ)    (centroid uncertainty only; the reference
+                        energies Eᵢ are treated as exact)</div>
+<p>Treating Eᵢ as exact is valid only while σ(cᵢ) is well above b·σ(Eᵢ).
+Tabulated energies carry 0.002–0.1 keV uncertainties, and for a strong peak
+with a realistic centroid uncertainty the energy term can dominate — the
+²¹⁴Pb 839.06 keV line, for example, is known only to ±0.09 keV. Prefer lines
+with small energy uncertainties, and never quote a centroid uncertainty below
+its statistical minimum σ_peak/√N.</p>
 <p>The covariance matrix of the parameters:</p>
 <div class='formula'>Cov(θ) = (AᵀWA)⁻¹     W = diag(1/σᵢ²)</div>
 
@@ -370,6 +380,9 @@ where   σᵢ = σ(cᵢ)    (centroid uncertainty; nuclear energy uncertainty
       model is correct and the input uncertainties are realistic.</li>
   <li><strong>Birge-scaled</strong> — statistical uncertainties × B.
       Applied automatically when B > 1.</li>
+  <li><strong>Query results</strong> — energy and efficiency queries carry the
+      same Birge scaling as the plotted bands. For an energy query only the
+      calibration's share is scaled; your own Δch₀ is not.</li>
 </ul>
 
 <!-- ── Birge ratio ────────────────────────────────────────────── -->
@@ -381,7 +394,10 @@ where   σᵢ = σ(cᵢ)    (centroid uncertainty; nuclear energy uncertainty
       <td>Model fits well; input uncertainties are realistic</td></tr>
   <tr><td>B &gt; 1</td>
       <td>Residuals exceed expectation: model inadequate or σᵢ underestimated.
-          CalEnEff inflates all reported uncertainties by B.</td></tr>
+          CalEnEff inflates all reported uncertainties by B. That assumes
+          the excess scatter is random: if the residuals follow a smooth
+          pattern, the error at a given energy can be several times the
+          B-scaled value.</td></tr>
   <tr><td>B &lt; 1</td>
       <td>σᵢ overestimated or very few points. Statistical uncertainties
           are used as-is.</td></tr>
@@ -389,7 +405,9 @@ where   σᵢ = σ(cᵢ)    (centroid uncertainty; nuclear energy uncertainty
 <div class='note'><strong>Rule of thumb:</strong> B > 2 is a warning sign.
 For energy calibration, try the Quadratic model or review centroid
 uncertainties. For efficiency, review the peak-area uncertainties and
-check for outliers in the residual plot.</div>
+check for outliers in the residual plot. The commonest cause of a large B
+is an input uncertainty that is physically too small: a peak area quoted
+better than √N, or a centroid better than σ_peak/√N.</div>
 
 <!-- ── Efficiency calibration ─────────────────────────────────── -->
 <h2>Efficiency calibration</h2>
@@ -397,13 +415,15 @@ check for outliers in the residual plot.</div>
 <h3>CalEnEff model (4-parameter)</h3>
 <p>CalEnEff fits the semi-empirical curve:</p>
 <div class='formula'>ε(E) = (a·E + b/E) · exp(c·E + d/E)</div>
-<p>The <code>b/E</code> and <code>d/E</code> terms make efficiency rise at low
-energies (increasing photoelectric cross-section below ~100 keV);
+<p>The <code>b/E</code> and <code>d/E</code> terms shape the low-energy turnover:
+efficiency rises towards lower energy as the photoelectric cross-section
+grows, then falls again below ~100–200 keV as absorption in the source,
+cryostat window and dead layer takes over;
 <code>a·E</code> and <code>c·E</code> produce the decline at high energies
 (decreasing detection probability). Four parameters are enough to describe
 a typical HPGe or NaI curve across the Ra-226 energy range.</p>
 
-<h3>Radware efficiency model (7-parameter)</h3>
+<h3>Radware efficiency model (EFFIT; 5 free parameters)</h3>
 <p>The widely used Radware/EFFIT function (D.C. Radford, ORNL) joins two
 quadratic-in-log polynomials with a smooth blending exponent G:</p>
 <div class='formula'>ln ε_low (E) = A + B·ln(E/100)  + C·[ln(E/100) ]²
@@ -411,62 +431,81 @@ ln ε_high(E) = D + E·ln(E/1000) + F·[ln(E/1000)]²
 
 ε(E) = exp{ [ (ln ε_low)^(−G) + (ln ε_high)^(−G) ]^(−1/G) }</div>
 <p>Reference energies: <strong>E₁ = 100 keV</strong>, <strong>E₂ = 1 000 keV</strong>.
-C is often fixed to zero in practice, giving six free parameters.
-G is typically negative (e.g. G = −3 to −5), producing a smooth join
-between the low- and high-energy branches.
+CalEnEff follows Radford's default procedure in <code>effit.c</code>:
+C = 0 and G = 15 are fixed, leaving five free parameters (A, B, D, E, F).
+G sets how sharply the two branches join. Neither branch is constrained
+beyond the calibration lines: with no line below ~150 keV the low-energy
+branch rests on a handful of points, and extrapolating it is meaningless.
 The Radware model requires more calibration points than the 4-parameter
 CalEnEff model and is preferred when the full energy range of a
 high-resolution HPGe detector must be covered.
 See: <a href="https://radware.phy.ornl.gov/gf3/">radware.phy.ornl.gov/gf3/</a></p>
 
 <h3>Measured efficiency</h3>
-<div class='formula'>εᵢ = Nᵢ / ( A · T · Iᵢ / 100 )
+<p>CalEnEff fits the <em>relative</em> efficiency, in arbitrary units:</p>
+<div class='formula'>εᵢ = Nᵢ / Iᵢ
 
   Nᵢ  = net peak area [counts]
-  A   = source activity at measurement time [Bq]
-  T   = live time [s]
-  Iᵢ  = emission probability [%]</div>
+  Iᵢ  = emission probability [%]  (any common scale will do, but every
+        line must be on the same one, taken from one evaluation)</div>
+<p>The absolute efficiency is Nᵢ / (A · T · Iᵢ/100), with A the source
+activity and T the live time; both are common to every line and only
+rescale the curve.</p>
 <p>Combined relative uncertainty (in quadrature):</p>
 <div class='formula'>( σ_ε / ε )² = ( σ_N / N )² + ( σ_I / I )²</div>
 <p>Activity uncertainty σ_A and live-time uncertainty are common to all
 points and shift the entire curve by a constant scale factor; they do
-not affect the fitted shape or the relative uncertainties.</p>
+not affect the fitted shape or the relative uncertainties. σ_N must include
+counting statistics — it can never be below √N — plus the background
+subtraction.</p>
 
 <h3>Non-linear fitting</h3>
 <p>CalEnEff calls <code>scipy.optimize.curve_fit</code>
 (Levenberg–Marquardt) with weights 1/σ²(εᵢ).
-The returned covariance matrix <strong>C</strong> is used directly for
-Monte Carlo propagation.</p>
+Its covariance matrix <strong>C</strong> gives the <em>stat</em> parameter
+uncertainties in the results table.</p>
 
 <!-- ── Monte Carlo propagation ────────────────────────────────── -->
 <h2>Monte Carlo uncertainty propagation</h2>
 <p>First-order (gradient) error propagation can underestimate the true
-uncertainty of a strongly non-linear function. CalEnEff instead draws
-10 000 parameter vectors from the multivariate normal distribution:</p>
-<div class='formula'>θ⁽ᵏ⁾ ~ 𝒩( θ̂, C )    k = 1 … 10 000</div>
-<p>and evaluates ε(E*; θ⁽ᵏ⁾) for each draw, yielding an empirical
-distribution at the query energy E*.</p>
+uncertainty of a strongly non-linear function. CalEnEff instead uses a
+parametric bootstrap: 10 000 times it redraws every input from its stated
+uncertainty and <em>refits</em> the model —</p>
+<div class='formula'>Nᵢ⁽ᵏ⁾ ~ 𝒩( Nᵢ, σ_Nᵢ ),   Iᵢ⁽ᵏ⁾ ~ 𝒩( Iᵢ, σ_Iᵢ )   →   θ⁽ᵏ⁾ = fit( … )
+k = 1 … 10 000      (energy calibration: cᵢ⁽ᵏ⁾ ~ 𝒩( cᵢ, σᵢ ))</div>
+<p>— and evaluates ε(E*; θ⁽ᵏ⁾) for each refit, yielding an empirical
+distribution at the query energy E*. Refitting captures the non-linearity
+of the fit itself, which sampling θ from a linearised covariance would not.
+The spread is then multiplied by the model's Birge ratio when B > 1.</p>
 
 <h3>What the output numbers mean</h3>
 <table>
   <tr><th>Output</th><th>Definition</th><th>When to use it</th></tr>
   <tr><td><strong>Best-fit</strong> ε(E*; θ̂)</td>
       <td>Direct evaluation of the fitted curve at E*</td>
-      <td>Point estimate (maximum-likelihood / least-squares result)</td></tr>
+      <td><strong>Point estimate to report</strong> (least-squares
+          result)</td></tr>
   <tr><td><strong>MC mean</strong></td>
-      <td>Average of the 10 000 sampled values</td>
-      <td>Bias-corrected estimate; preferred when the curve is
-          strongly non-linear (Jensen's inequality shifts the mean)</td></tr>
+      <td>Average of the 10 000 refitted values</td>
+      <td>A diagnostic, <em>not</em> a bias-corrected value: MC mean −
+          best-fit estimates the fit's bias. Normally it is far below MC σ
+          and either value will do; if it is not, the bias-corrected value
+          is 2·best-fit − MC mean.</td></tr>
   <tr><td><strong>MC σ</strong></td>
-      <td>Standard deviation of the 10 000 sampled values</td>
+      <td>Standard deviation of the 10 000 values, × the model's Birge
+          ratio when B > 1</td>
       <td><strong>Recommended uncertainty to report.</strong>
-          Correctly captures parameter correlations and non-linearity
+          Captures parameter correlations and the fit's non-linearity
           that a simple gradient propagation would miss.</td></tr>
 </table>
 <div class='note'>
 <strong>Practical guidance:</strong>
-Report the MC mean ± MC σ (1-σ, 68% coverage) as your efficiency
-value with uncertainty.
+Report the best-fit value ± MC σ (1-σ, 68% coverage) as your efficiency
+value with uncertainty — inside the calibrated energy range only. Outside it
+both models extrapolate, can disagree by orders of magnitude, and CalEnEff
+flags such queries. The difference between the KRF and Radware curves is a
+model uncertainty that neither MC σ contains; where it exceeds MC σ, quote it
+separately.
 If the MC distribution is visibly asymmetric (check the residual panel),
 report the 16th and 84th percentiles of the sample as the ±1-σ interval
 instead of the standard deviation.
@@ -483,7 +522,7 @@ from the fit result table so reviewers can judge the goodness of fit.
   <tr><td>Energy — Linear</td><td>2 (a, b)</td><td>n − 2</td></tr>
   <tr><td>Energy — Quadratic</td><td>3 (a, b, d)</td><td>n − 3</td></tr>
   <tr><td>Efficiency (CalEnEff)</td><td>4 (a, b, c, d)</td><td>n − 4</td></tr>
-  <tr><td>Efficiency (Radware)</td><td>6–7 (A…F [+G])</td><td>n − 6 or n − 7</td></tr>
+  <tr><td>Efficiency (Radware)</td><td>5 (A, B, D, E, F; C = 0, G = 15 fixed)</td><td>n − 5</td></tr>
 </table>
 
 <!-- ── Reference sources ─────────────────────────────────────── -->
@@ -496,48 +535,80 @@ and
 (see also
 <a href="https://nds.iaea.org/xgamma_standards/">IAEA NDS xgamma standards</a>).
 Always verify against the database version current at the time of
-your measurement.</p>
+your measurement, and take every line of one calibration from the
+<em>same</em> evaluation: mixing them introduces few-percent inconsistencies
+between lines. The tables below were checked line by line on 2026-09-24
+against the IAEA recommended standards and, for nuclides or lines those
+do not include, ENSDF via the
+<a href="https://www-nds.iaea.org/relnsd/vcharthtml/VChartHTML.html">IAEA LiveChart</a>;
+each table's source note says which rows were corrected.</p>
 
 <h3>²²⁶Ra — T½ = 1 600 y — secular equilibrium with daughters</h3>
-<p>Covers 46 keV – 2 448 keV; ideal for a single-source full-range
-calibration. In secular equilibrium the chain includes
-<strong>²²²Rn → ²¹⁴Pb → ²¹⁴Bi</strong> as the dominant gamma emitters.
-The 186 keV line of ²²⁶Ra overlaps ²³⁵U at 185.7 keV and should be
-excluded when measuring uranium-containing samples.
-Lines below ~100 keV are sensitive to source self-absorption and geometry.</p>
+<p>Covers 53 keV – 2 448 keV with lines in equilibrium — a convenient
+single-source calibration, <strong>provided three conditions hold</strong>.
+In secular equilibrium the chain includes
+<strong>²²²Rn → ²¹⁴Pb → ²¹⁴Bi</strong> as the dominant gamma emitters.</p>
+<ul>
+  <li><strong>Equilibrium.</strong> The 186 keV line is ²²⁶Ra itself; every
+      other line is emitted after ²²²Rn (T½ 3.8 d). A source that is not
+      gas-tight, or was sealed less than ~3 weeks before counting, holds
+      fewer daughters than ²²⁶Ra, and the 186 keV point then sits above
+      the curve fitted through the rest — check it, or leave it out.
+      ²¹⁰Pb (46.5 keV, T½ 22.2 y) is not in equilibrium in any source
+      younger than about a century.</li>
+  <li><strong>True coincidence summing.</strong> ²¹⁴Bi decays through
+      cascades: most lines are emitted together with the 609.3 keV
+      transition and lose counts, while several (1377.7, 1729.6, 1764.5,
+      1847.4, 2118.5 keV) also gain sum-peak counts from two-step cascades.
+      Close to the detector both effects reach tens of percent, in opposite
+      directions, and <strong>CalEnEff does not correct them</strong>. Count
+      far enough away for them to be negligible (typically ≥ 10–25 cm,
+      depending on detector size), or correct the peak areas with a
+      dedicated code before fitting.</li>
+  <li><strong>Interferences.</strong> The 186 keV line overlaps ²³⁵U at
+      185.7 keV and should be excluded when measuring uranium-containing
+      samples. Lines below ~100 keV are sensitive to source self-absorption
+      and geometry, and the 74–90 keV region is crowded with Bi, Po and
+      shielding Pb X-rays.</li>
+</ul>
 <table>
   <tr><th>Energy (keV)</th><th>Daughter</th><th>I (%)</th><th>Notes</th></tr>
-  <tr><td>46.52</td>   <td>²¹⁰Pb</td><td>4.25</td>   <td>Self-absorption sensitive; requires thin source</td></tr>
-  <tr><td>53.23</td>   <td>²¹⁴Pb</td><td>1.06</td>   <td>Weak; low-energy calibration only</td></tr>
-  <tr><td>74.82</td>   <td>²¹⁴Pb</td><td>0.25</td>   <td>Very weak</td></tr>
-  <tr><td>186.21</td>  <td>²²⁶Ra</td><td>3.64(4)</td><td>Overlaps ²³⁵U 185.7 keV — exclude for U samples</td></tr>
-  <tr><td>241.99</td>  <td>²¹⁴Pb</td><td>7.43</td>   <td></td></tr>
-  <tr><td>295.22</td>  <td>²¹⁴Pb</td><td>18.41</td>  <td></td></tr>
-  <tr><td>351.93</td>  <td>²¹⁴Pb</td><td>35.60</td>  <td>Strongest ²¹⁴Pb line</td></tr>
-  <tr><td>405.75</td>  <td>²¹⁴Pb</td><td>0.531</td>  <td>Very weak</td></tr>
-  <tr><td>609.31</td>  <td>²¹⁴Bi</td><td>45.49</td>  <td>Strong, well-isolated; primary calibration line</td></tr>
-  <tr><td>665.45</td>  <td>²¹⁴Bi</td><td>1.530</td>  <td></td></tr>
-  <tr><td>768.36</td>  <td>²¹⁴Bi</td><td>4.894</td>  <td></td></tr>
-  <tr><td>806.17</td>  <td>²¹⁴Bi</td><td>1.220</td>  <td></td></tr>
-  <tr><td>934.06</td>  <td>²¹⁴Bi</td><td>3.107</td>  <td></td></tr>
-  <tr><td>1120.29</td> <td>²¹⁴Bi</td><td>14.91</td>  <td></td></tr>
-  <tr><td>1155.19</td> <td>²¹⁴Bi</td><td>1.638</td>  <td></td></tr>
-  <tr><td>1238.11</td> <td>²¹⁴Bi</td><td>5.834</td>  <td></td></tr>
-  <tr><td>1280.96</td> <td>²¹⁴Bi</td><td>1.434</td>  <td></td></tr>
-  <tr><td>1377.67</td> <td>²¹⁴Bi</td><td>3.985</td>  <td></td></tr>
-  <tr><td>1401.50</td> <td>²¹⁴Bi</td><td>1.320</td>  <td></td></tr>
-  <tr><td>1407.98</td> <td>²¹⁴Bi</td><td>2.394</td>  <td></td></tr>
-  <tr><td>1509.23</td> <td>²¹⁴Bi</td><td>2.130</td>  <td></td></tr>
-  <tr><td>1661.28</td> <td>²¹⁴Bi</td><td>1.046</td>  <td></td></tr>
-  <tr><td>1729.60</td> <td>²¹⁴Bi</td><td>2.933</td>  <td></td></tr>
-  <tr><td>1764.49</td> <td>²¹⁴Bi</td><td>15.31</td>  <td>Second strongest ²¹⁴Bi line</td></tr>
-  <tr><td>1847.42</td> <td>²¹⁴Bi</td><td>2.025</td>  <td></td></tr>
-  <tr><td>2118.55</td> <td>²¹⁴Bi</td><td>1.147</td>  <td></td></tr>
-  <tr><td>2204.21</td> <td>²¹⁴Bi</td><td>4.985</td>  <td></td></tr>
-  <tr><td>2447.86</td> <td>²¹⁴Bi</td><td>1.548</td>  <td>Highest-energy usable line</td></tr>
+  <tr><td>46.539</td>   <td>²¹⁰Pb</td><td>4.25</td>   <td>²¹⁰Pb (T½ 22.2 y) is NOT in equilibrium with ²²⁶Ra unless the source is ≳100 y old — do not use for efficiency without its own activity; self-absorption sensitive</td></tr>
+  <tr><td>53.227</td>   <td>²¹⁴Pb</td><td>1.066</td>   <td>Weak; low-energy calibration only</td></tr>
+  <tr><td>74.815</td>   <td>²¹⁴Pb (Bi Kα₂ X-ray)</td><td>5.22</td>   <td>X-ray, not a γ-ray; coincides with Pb Kα₁ (74.97 keV) fluorescence from lead shielding — avoid</td></tr>
+  <tr><td>186.211</td>  <td>²²⁶Ra</td><td>3.533(28)</td><td>Overlaps ²³⁵U 185.7 keV — exclude for U samples</td></tr>
+  <tr><td>241.997</td>  <td>²¹⁴Pb</td><td>7.19</td>   <td></td></tr>
+  <tr><td>295.224</td>  <td>²¹⁴Pb</td><td>18.28</td>  <td></td></tr>
+  <tr><td>351.932</td>  <td>²¹⁴Pb</td><td>35.34</td>  <td>Strongest ²¹⁴Pb line</td></tr>
+  <tr><td>405.72</td>  <td>²¹⁴Bi</td><td>0.168</td>  <td>Very weak</td></tr>
+  <tr><td>609.316</td>  <td>²¹⁴Bi</td><td>45.16</td>  <td>Strong, well-isolated; primary calibration line</td></tr>
+  <tr><td>665.453</td>  <td>²¹⁴Bi</td><td>1.521</td>  <td></td></tr>
+  <tr><td>768.367</td>  <td>²¹⁴Bi</td><td>4.85</td>  <td></td></tr>
+  <tr><td>806.185</td>  <td>²¹⁴Bi</td><td>1.255</td>  <td></td></tr>
+  <tr><td>934.061</td>  <td>²¹⁴Bi</td><td>3.074</td>  <td></td></tr>
+  <tr><td>1120.287</td> <td>²¹⁴Bi</td><td>14.78</td>  <td></td></tr>
+  <tr><td>1155.19</td> <td>²¹⁴Bi</td><td>1.624</td>  <td></td></tr>
+  <tr><td>1238.11</td> <td>²¹⁴Bi</td><td>5.79</td>  <td></td></tr>
+  <tr><td>1280.96</td> <td>²¹⁴Bi</td><td>1.425</td>  <td></td></tr>
+  <tr><td>1377.669</td> <td>²¹⁴Bi</td><td>3.954</td>  <td></td></tr>
+  <tr><td>1401.516</td> <td>²¹⁴Bi</td><td>1.324</td>  <td></td></tr>
+  <tr><td>1407.993</td> <td>²¹⁴Bi</td><td>2.369</td>  <td></td></tr>
+  <tr><td>1509.217</td> <td>²¹⁴Bi</td><td>2.108</td>  <td></td></tr>
+  <tr><td>1661.316</td> <td>²¹⁴Bi</td><td>1.037</td>  <td></td></tr>
+  <tr><td>1729.64</td> <td>²¹⁴Bi</td><td>2.817</td>  <td></td></tr>
+  <tr><td>1764.539</td> <td>²¹⁴Bi</td><td>15.17</td>  <td>Second strongest ²¹⁴Bi line</td></tr>
+  <tr><td>1847.42</td> <td>²¹⁴Bi</td><td>2.000</td>  <td></td></tr>
+  <tr><td>2118.536</td> <td>²¹⁴Bi</td><td>1.148</td>  <td></td></tr>
+  <tr><td>2204.071</td> <td>²¹⁴Bi</td><td>4.89</td>  <td></td></tr>
+  <tr><td>2447.673</td> <td>²¹⁴Bi</td><td>1.536</td>  <td>Highest-energy usable line</td></tr>
 </table>
-<p>Source: <a href="https://www.lnhb.fr/nuclear-data/nuclear-data-table/">LNHB/BIPM-5</a>;
-cross-checked with <a href="https://www.nndc.bnl.gov/nudat3/">NNDC NuDat 3</a>.</p>
+<p>Source: <a href="https://www-nds.iaea.org/xgamma_standards/">IAEA recommended
+decay data standards for detector calibration</a> — the same values as the
+example dataset <code>226Ra_En_Area.txt</code>; the 46.5, 74.8 and 405.7 keV
+rows, which that set does not include, from ENSDF. All rows harmonised
+2026-09-24: the previous table mixed evaluations, listed a Bi X-ray as a
+0.25% ²¹⁴Pb γ-ray (it is 5.22%), and gave 405.7 keV the nuclide and
+intensity of a different line.</p>
 
 <h3>¹⁵²Eu — T½ = 13.537 y</h3>
 <p>Excellent single-source calibration standard covering 122–1 408 keV
@@ -555,9 +626,9 @@ Weak lines (&lt;1%) are listed for completeness but are rarely used alone.</p>
   <tr><td>411.116</td><td>2.238(10)</td><td></td></tr>
   <tr><td>443.961</td><td>3.125(14)</td><td></td></tr>
   <tr><td>488.682</td><td>0.412(4)</td><td>Weak</td></tr>
-  <tr><td>563.984</td><td>0.102(1)</td><td>Very weak</td></tr>
+  <tr><td>563.986</td><td>0.494(5)</td><td>Very weak</td></tr>
   <tr><td>586.265</td><td>0.458(4)</td><td>Weak</td></tr>
-  <tr><td>678.580</td><td>0.489(4)</td><td>Weak</td></tr>
+  <tr><td>678.623</td><td>0.473(4)</td><td>Weak</td></tr>
   <tr><td>688.674</td><td>0.859(5)</td><td>Weak</td></tr>
   <tr><td>778.904</td><td>12.97(6)</td><td></td></tr>
   <tr><td>867.380</td><td>4.214(20)</td><td></td></tr>
@@ -570,7 +641,9 @@ Weak lines (&lt;1%) are listed for completeness but are rarely used alone.</p>
   <tr><td>1299.142</td><td>1.626(8)</td><td></td></tr>
   <tr><td>1408.013</td><td>20.87(9)</td><td>Primary high-energy anchor</td></tr>
 </table>
-<p>Source: <a href="http://www.lnhb.fr/nuclides/Eu-152_tables.pdf">LNHB Eu-152 tables</a></p>
+<p>Source: <a href="http://www.lnhb.fr/nuclides/Eu-152_tables.pdf">LNHB Eu-152 tables</a>;
+563.986 keV (listed at 0.102%, really 0.494%) and 678.623 keV corrected from
+ENSDF, 2026-09-24.</p>
 
 <h3>¹³³Ba — T½ = 10.551 y</h3>
 <p>Covers 53–384 keV with 9 lines. The 356 keV line (I = 63.6%) is one of
@@ -583,13 +656,16 @@ efficiency near the K-edge region of many detector materials.</p>
   <tr><td>79.614</td><td>2.63(19)</td> <td>Cs K X-ray blend region</td></tr>
   <tr><td>80.998</td><td>33.31(30)</td><td>Strong; Cs K X-ray region</td></tr>
   <tr><td>160.612</td><td>0.638(6)</td><td>Weak</td></tr>
-  <tr><td>223.116</td><td>0.453(4)</td><td>Weak</td></tr>
+  <tr><td>223.237</td><td>0.4530(34)</td><td>Weak</td></tr>
   <tr><td>276.404</td><td>7.16(5)</td> <td></td></tr>
-  <tr><td>302.851</td><td>19.10(12)</td><td></td></tr>
-  <tr><td>356.013</td><td>63.63(20)</td><td>Strongest line; primary calibration point</td></tr>
-  <tr><td>383.849</td><td>9.12(6)</td> <td></td></tr>
+  <tr><td>302.851</td><td>18.34(13)</td><td></td></tr>
+  <tr><td>356.013</td><td>62.05(19)</td><td>Strongest line; primary calibration point</td></tr>
+  <tr><td>383.849</td><td>8.94(6)</td> <td></td></tr>
 </table>
-<p>Source: <a href="http://www.lnhb.fr/nuclides/Ba-133_tables.pdf">LNHB Ba-133 tables</a></p>
+<p>Source: <a href="http://www.lnhb.fr/nuclides/Ba-133_tables.pdf">LNHB Ba-133 tables</a>;
+302.9, 356.0 and 383.8 keV from the IAEA recommended standards and the
+223.2 keV energy from ENSDF, 2026-09-24 — the previous values were an older,
+2–4% higher evaluation.</p>
 
 <h3>⁵⁷Co — T½ = 271.79 d</h3>
 <p>Low-energy standard; the 122 keV line is the primary anchor below
@@ -650,21 +726,20 @@ The high-energy doublet at 1121 and 1221 keV extends calibrations well
 into the ⁶⁰Co region.</p>
 <table>
   <tr><th>Energy (keV)</th><th>I (%)</th><th>Notes</th></tr>
-  <tr><td>31.74</td>  <td>~0.18</td><td>Very weak; X-ray region</td></tr>
-  <tr><td>65.72</td>  <td>~3.1</td> <td></td></tr>
+  <tr><td>31.738</td>  <td>0.874</td><td>Very weak; X-ray region</td></tr>
+  <tr><td>65.722</td>  <td>3.013</td> <td></td></tr>
   <tr><td>67.75</td>  <td>42.4</td> <td>Strongest low-energy line</td></tr>
-  <tr><td>84.68</td>  <td>~2.3</td> <td></td></tr>
+  <tr><td>84.68</td>  <td>2.654</td> <td></td></tr>
   <tr><td>100.11</td> <td>14.2</td> <td></td></tr>
-  <tr><td>113.67</td> <td>~3.5</td> <td></td></tr>
-  <tr><td>116.42</td> <td>~0.3</td> <td>Weak</td></tr>
+  <tr><td>113.672</td> <td>1.871</td> <td></td></tr>
+  <tr><td>116.418</td> <td>0.444</td> <td>Weak</td></tr>
   <tr><td>152.43</td> <td>7.0</td>  <td></td></tr>
-  <tr><td>156.39</td> <td>~2.6</td> <td></td></tr>
+  <tr><td>156.386</td> <td>2.671</td> <td></td></tr>
   <tr><td>179.39</td> <td>~3.1</td> <td></td></tr>
-  <tr><td>198.35</td> <td>~1.5</td> <td></td></tr>
+  <tr><td>198.352</td> <td>1.465</td> <td></td></tr>
   <tr><td>222.11</td> <td>~7.5</td> <td></td></tr>
   <tr><td>229.32</td> <td>~3.6</td> <td></td></tr>
-  <tr><td>264.08</td> <td>~3.5</td> <td></td></tr>
-  <tr><td>1100.44</td><td>~1.1</td> <td>Weak</td></tr>
+  <tr><td>264.074</td> <td>3.612</td> <td></td></tr>
   <tr><td>1121.29</td><td>35.24</td><td>Strong; high-energy anchor</td></tr>
   <tr><td>1189.05</td><td>16.5</td> <td></td></tr>
   <tr><td>1221.39</td><td>27.14</td><td></td></tr>
@@ -674,7 +749,10 @@ into the ⁶⁰Co region.</p>
 <a href="https://www.nndc.bnl.gov/nudat3/">NNDC NuDat 3</a> for
 publication-quality data. T½ makes Ta-182 suitable for measurements
 spanning several weeks.</div>
-<p>Source: <a href="https://www.nndc.bnl.gov/nudat3/">NNDC NuDat 3</a></p>
+<p>Source: ENSDF, via <a href="https://www.nndc.bnl.gov/nudat3/">NNDC NuDat 3</a>
+and the IAEA LiveChart. Eight intensities corrected 2026-09-24 (113.67 keV was
+listed at 3.5%, really 1.87%), and a 1100.44 keV line that does not exist
+removed.</p>
 
 <h3>²⁴¹Am — T½ = 432.2 y</h3>
 <p>Americium-241 is the standard for very low-energy (below 100 keV)
@@ -686,13 +764,14 @@ The 26.345 keV line enables calibration into the X-ray region but is
 strongly affected by source encapsulation and detector window attenuation.</p>
 <table>
   <tr><th>Energy (keV)</th><th>I (%)</th><th>Notes</th></tr>
-  <tr><td>26.345</td><td>2.27</td> <td>Np L X-ray region; geometry sensitive</td></tr>
+  <tr><td>26.345</td><td>2.400</td> <td>Np L X-ray region; geometry sensitive</td></tr>
   <tr><td>33.196</td><td>0.126</td><td>Very weak</td></tr>
   <tr><td>43.420</td><td>0.073</td><td>Very weak</td></tr>
   <tr><td>59.537</td><td>35.92</td><td>Primary calibration line</td></tr>
 </table>
 <p>Source: <a href="https://www.lnhb.fr/nuclides/Am-241_tables.pdf">LNHB Am-241 tables</a>;
-<a href="https://www.nndc.bnl.gov/nudat3/">NNDC NuDat 3</a></p>
+<a href="https://www.nndc.bnl.gov/nudat3/">NNDC NuDat 3</a>; 26.345 keV from the
+IAEA recommended standards, 2026-09-24.</p>
 
 <h3>²⁴³Am — T½ = 7 370 y (+ ²³⁹Np daughter, T½ = 2.356 d)</h3>
 <p>Americium-243 in secular equilibrium with its ²³⁹Np daughter provides
@@ -706,19 +785,21 @@ reach secular equilibrium.</p>
 <table>
   <tr><th>Energy (keV)</th><th>Emitter</th><th>I (%)</th><th>Notes</th></tr>
   <tr><td>43.53</td> <td>²⁴³Am</td><td>5.9</td> <td></td></tr>
-  <tr><td>61.47</td> <td>²³⁹Np</td><td>0.26</td><td>Weak</td></tr>
-  <tr><td>74.663</td><td>²⁴³Am</td><td>57.0</td><td>Strongest Am-243 line</td></tr>
-  <tr><td>86.496</td><td>²³⁹Np</td><td>3.14</td><td></td></tr>
+  <tr><td>61.46</td> <td>²³⁹Np</td><td>1.300</td><td>Weak</td></tr>
+  <tr><td>74.660</td><td>²⁴³Am</td><td>67.2</td><td>Strongest Am-243 line</td></tr>
+  <tr><td>86.710</td><td>²³⁹Np</td><td>0.346</td><td></td></tr>
   <tr><td>106.12</td><td>²⁴³Am+²³⁹Np</td><td>~25</td><td>Blend; use with care</td></tr>
-  <tr><td>144.62</td><td>²³⁹Np</td><td>0.61</td><td>Weak</td></tr>
-  <tr><td>174.01</td><td>²³⁹Np</td><td>0.26</td><td>Weak</td></tr>
-  <tr><td>209.76</td><td>²³⁹Np</td><td>3.91</td><td></td></tr>
-  <tr><td>228.18</td><td>²³⁹Np</td><td>11.5</td><td></td></tr>
+  <tr><td>209.753</td><td>²³⁹Np</td><td>3.363</td><td></td></tr>
+  <tr><td>228.183</td><td>²³⁹Np</td><td>10.73</td><td></td></tr>
   <tr><td>277.60</td><td>²³⁹Np</td><td>14.3</td><td></td></tr>
-  <tr><td>334.29</td><td>²³⁹Np</td><td>0.023</td><td>Very weak</td></tr>
+  <tr><td>334.31</td><td>²³⁹Np</td><td>2.056</td><td>Very weak</td></tr>
 </table>
 <p>Source: <a href="https://www.nndc.bnl.gov/nudat3/">NNDC NuDat 3</a>;
-<a href="https://nds.iaea.org/xgamma_standards/">IAEA NDS xgamma standards</a></p>
+<a href="https://nds.iaea.org/xgamma_standards/">IAEA NDS xgamma standards</a>.
+Corrected 2026-09-24 against those and ENSDF: 74.66 keV (was 57%, really
+67.2%), 334.31 keV (was 0.023%, really 2.06%) and four other rows; the
+86.50, 144.62 and 174.01 keV rows named lines that do not exist — the first
+is now the real 86.71 keV line, the other two are removed.</p>
 
 <h3>⁵⁶Co — T½ = 77.27 d</h3>
 <p>Cobalt-56 extends efficiency calibrations well beyond the ⁶⁰Co range
@@ -737,15 +818,16 @@ available as a sealed calibration source.</p>
   <tr><td>1771.341</td><td>15.42</td><td></td></tr>
   <tr><td>2034.761</td><td>7.77</td> <td></td></tr>
   <tr><td>2598.445</td><td>16.97</td><td></td></tr>
-  <tr><td>3009.577</td><td>0.95</td> <td>Weak</td></tr>
-  <tr><td>3201.946</td><td>3.09</td> <td></td></tr>
-  <tr><td>3253.419</td><td>7.55</td> <td></td></tr>
+  <tr><td>3009.559</td><td>1.038</td> <td>Weak</td></tr>
+  <tr><td>3201.930</td><td>3.203</td> <td></td></tr>
+  <tr><td>3253.402</td><td>7.870</td> <td></td></tr>
   <tr><td>3272.984</td><td>1.86</td> <td></td></tr>
-  <tr><td>3369.986</td><td>0.62</td> <td>Weak</td></tr>
   <tr><td>3451.119</td><td>0.94</td> <td>Highest usable line</td></tr>
 </table>
 <p>Source: <a href="https://www.lnhb.fr/nuclides/Co-56_tables.pdf">LNHB Co-56 tables</a>;
-<a href="https://www.nndc.bnl.gov/nudat3/">NNDC NuDat 3</a></p>
+<a href="https://www.nndc.bnl.gov/nudat3/">NNDC NuDat 3</a>. 3009.6, 3201.9 and
+3253.4 keV intensities from the IAEA recommended standards, 2026-09-24, and a
+3369.99 keV row listed at 0.62% removed — that line is 0.010%.</p>
 
 <h3>⁷⁵Se — T½ = 119.78 d</h3>
 <p>Selenium-75 provides 9 lines from 66 to 401 keV, covering the
@@ -755,18 +837,20 @@ Se-75 self-consistent for efficiency shape validation.
 The 279.5 keV line (25.2%) is a useful cross-check point.</p>
 <table>
   <tr><th>Energy (keV)</th><th>I (%)</th><th>Notes</th></tr>
-  <tr><td>66.061</td><td>0.99</td> <td>Weak; low-energy region</td></tr>
+  <tr><td>66.052</td><td>1.112</td> <td>Weak; low-energy region</td></tr>
   <tr><td>96.734</td><td>3.40</td> <td></td></tr>
   <tr><td>121.115</td><td>17.32</td><td></td></tr>
   <tr><td>136.000</td><td>58.76</td><td>Primary anchor</td></tr>
-  <tr><td>198.606</td><td>1.35</td> <td>Weak</td></tr>
+  <tr><td>198.606</td><td>1.48</td> <td>Weak</td></tr>
   <tr><td>264.658</td><td>59.35</td><td>Co-equal with 136 keV; useful self-check</td></tr>
   <tr><td>279.542</td><td>25.16</td><td></td></tr>
   <tr><td>303.924</td><td>1.31</td> <td>Weak</td></tr>
   <tr><td>400.657</td><td>11.53</td><td></td></tr>
 </table>
 <p>Source: <a href="https://www.nndc.bnl.gov/nudat3/">NNDC NuDat 3</a>;
-<a href="https://nds.iaea.org/xgamma_standards/">IAEA NDS xgamma standards</a></p>
+<a href="https://nds.iaea.org/xgamma_standards/">IAEA NDS xgamma standards</a>;
+66.05 and 198.61 keV corrected from the latter, 2026-09-24 (both were ~10%
+low).</p>
 
 <!-- ── Nuclear data databases ─────────────────────────────────── -->
 <h2>Nuclear data databases</h2>
