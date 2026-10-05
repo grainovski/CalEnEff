@@ -144,14 +144,14 @@ instance: `wsl --install AlmaLinux-10 --name AlmaStock --no-launch`.
 ## Tests
 
 ```bash
-python verify/verify_v4.py     # 28 checks — engine, headless
-python verify/verify_gui.py    # 24 checks — real Tk widgets, needs a display, ~90 s
+python verify/verify_v4.py     # 40 checks — engine, headless
+python verify/verify_gui.py    # 31 checks — real Tk widgets, needs a display, ~20 s
 ```
 
 Both exit non-zero on failure and locate the repo from their own path, so
 they run unedited from any checkout.
 
-**Count the PASS lines, not the verdict.** Fewer than 28 and 24 means an
+**Count the PASS lines, not the verdict.** Fewer than 40 and 31 means an
 incomplete environment rather than a healthy project — a suite that silently
 collects fewer checks looks identical to success.
 
@@ -163,9 +163,13 @@ Two things worth knowing:
 * `verify_gui.py` **overwrites `226Ra_En_Area_Res.txt`** — every calibration
   rewrites that file from scratch, so any query log in it is lost.
 
-A full calibration takes ~14 s. If it takes ~70 s, the `OptimizeWarning`
-filter near the top of `ra226_gui.py` is missing — one line, worth a 3–5×
-difference.
+A full calibration of the bundled dataset takes roughly 10–15 s on a modern
+desktop. Judge by a few runs, not one: on a hybrid-core Windows machine the
+same run has been measured anywhere from 10 s to 50 s back to back, with no
+code change and an idle system, so a single slow run proves nothing. If it is
+*consistently* several times slower, check that the `OptimizeWarning` filter
+near the top of `ra226_gui.py` is still there — that one line was worth a 5×
+difference when it went in.
 
 `build.ps1` exiting 0 does **not** prove the frozen executable runs. Launch it
 after building; this project's historical first-run crash was an MKL/Tk
