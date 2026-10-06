@@ -112,6 +112,23 @@ chmod 755 "$STAGING/usr/bin/caleneff"
 cat > /tmp/changelog <<EOF
 caleneff (${VER}) stable; urgency=low
 
+  * Radware Monte Carlo fixed: each refit started from a fresh parset() seed
+    and, on the example data, converged to a worse local minimum, so the
+    Radware band and query described a different curve from the one drawn
+    (7.4 sigma off at 843 keV). Refits now start from the best fit, with
+    parset() only as a fallback; the best fit itself searches 62 starts and
+    reports a second minimum within dchi2/B^2 < 1 as a model ambiguity.
+  * One rule for band, query, histogram and SpectraTools export: the value is
+    the best fit, the 1 sigma comes from the Monte Carlo 16/50/84 % quantiles
+    times the Birge ratio. A bias check warns when the Monte Carlo is not
+    centred on the best fit. Query log lines changed accordingly.
+  * Export header lists the Radware best fit (it listed the mean of the
+    Monte Carlo parameter sets) and the bias check.
+
+ -- grainovski <grainovski@googlemail.com>  $(date -R)
+
+caleneff (4.8) stable; urgency=low
+
   * Query results carry the Birge scaling the plotted bands always had; for an
     energy query only the calibration's share is scaled, not the user's own
     channel uncertainty.
@@ -125,7 +142,7 @@ caleneff (${VER}) stable; urgency=low
   * Knowledge Database corrected line by line; Ra-226 caveats on equilibrium,
     Pb-210 and coincidence summing; the help describes the actual methods.
 
- -- grainovski <grainovski@googlemail.com>  $(date -R)
+ -- grainovski <grainovski@googlemail.com>  Fri, 25 Sep 2026 18:00:00 +0300
 
 caleneff (4.7) stable; urgency=low
 

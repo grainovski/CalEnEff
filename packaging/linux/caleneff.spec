@@ -1,7 +1,7 @@
 # Version is supplied by build_rpm.sh via --define "version X.Y", which reads
 # it from Ra226_Calibration.iss so the whole project has one source of truth.
 # The fallback below only applies when rpmbuild is invoked by hand.
-%{!?version: %define version 4.8}
+%{!?version: %define version 4.9}
 
 Name:           caleneff
 Version:        %{version}
@@ -148,6 +148,20 @@ if [ "$1" = "0" ]; then
 fi
 
 %changelog
+* Tue Oct 06 2026 grainovski <grainovski@googlemail.com> - 4.9-1
+- Radware Monte Carlo fixed: each refit started from a fresh parset() seed
+  and, on the example data, converged to a worse local minimum, so the
+  Radware band and query described a different curve from the one drawn
+  (7.4 sigma off at 843 keV). Refits now start from the best fit, with
+  parset() only as a fallback; the best fit itself searches 62 starts and
+  reports a second minimum within dchi2/B^2 < 1 as a model ambiguity.
+- One rule for band, query, histogram and SpectraTools export: the value is
+  the best fit, the 1 sigma comes from the Monte Carlo 16/50/84 %% quantiles
+  times the Birge ratio. A bias check warns when the Monte Carlo is not
+  centred on the best fit. Query log lines changed accordingly.
+- Export header lists the Radware best fit (it listed the mean of the Monte
+  Carlo parameter sets) and the bias check.
+
 * Fri Sep 25 2026 grainovski <grainovski@googlemail.com> - 4.8-1
 - Query results carry the Birge scaling the plotted bands always had; they
   used to report the unscaled Monte Carlo spread. For an energy query only the
