@@ -477,38 +477,60 @@ k = 1 … 10 000      (energy calibration: cᵢ⁽ᵏ⁾ ~ 𝒩( cᵢ, σᵢ ))<
 distribution at the query energy E*. Refitting captures the non-linearity
 of the fit itself, which sampling θ from a linearised covariance would not.
 The spread is then multiplied by the model's Birge ratio when B > 1.</p>
+<p>Every refit starts from the model's own best fit. The start is the same
+fixed point for every refit — not the previous refit's result — so the
+samples stay independent, and each refit converges in the same χ² minimum
+as the plotted curve. That matters for Radware, whose χ² surface has several
+minima: in v4.8 and earlier each Radware refit started from a fresh
+<code>parset()</code> seed, and on data whose lowest line lies well above
+100 keV that seed lands in a different, worse minimum (102 χ² units worse on
+the v4.8 example data), so the band described a different curve from the
+one drawn. <code>parset()</code> is now only a fallback for refits whose
+warm start is rejected.</p>
 
 <h3>What the output numbers mean</h3>
+<p>The plotted band, the query result, the MC histogram and the SpectraTools
+export all use one rule. With p16, p50 and p84 the 15.87, 50 and 84.13 %
+quantiles of the refitted values at E*, and B the Birge ratio (taken as 1
+when it is below 1):</p>
+<div class='formula'>value = ε(E*; θ̂)           (the best fit)
+lower 1σ = B·(p50 − p16)      upper 1σ = B·(p84 − p50)
+σ = B·(p84 − p16)/2           (symmetric summary; the export's deff)</div>
 <table>
   <tr><th>Output</th><th>Definition</th><th>When to use it</th></tr>
-  <tr><td><strong>Best-fit</strong> ε(E*; θ̂)</td>
+  <tr><td><strong>Best fit</strong> ε(E*; θ̂)</td>
       <td>Direct evaluation of the fitted curve at E*</td>
-      <td><strong>Point estimate to report</strong> (least-squares
+      <td><strong>The value to report</strong> (least-squares
           result)</td></tr>
-  <tr><td><strong>MC mean</strong></td>
-      <td>Average of the 10 000 refitted values</td>
-      <td>A diagnostic, <em>not</em> a bias-corrected value: MC mean −
-          best-fit estimates the fit's bias. Normally it is far below MC σ
-          and either value will do; if it is not, the bias-corrected value
-          is 2·best-fit − MC mean.</td></tr>
-  <tr><td><strong>MC σ</strong></td>
-      <td>Standard deviation of the 10 000 values, × the model's Birge
-          ratio when B > 1</td>
-      <td><strong>Recommended uncertainty to report.</strong>
-          Captures parameter correlations and the fit's non-linearity
-          that a simple gradient propagation would miss.</td></tr>
+  <tr><td><strong>Δε (1σ, ×B)</strong></td>
+      <td>+upper / −lower as above</td>
+      <td><strong>The uncertainty to report.</strong> Captures parameter
+          correlations, the fit's non-linearity and any asymmetry, and
+          ignores the odd runaway refit that would inflate a standard
+          deviation. Measured from the MC median, so the interval always
+          contains the best fit.</td></tr>
+  <tr><td><strong>MC median</strong> and <strong>z</strong></td>
+      <td>p50, and z = (p50 − best fit) / ((p84 − p16)/2), unscaled</td>
+      <td>A <em>check</em>, not a result. A healthy bootstrap gives |z| of a
+          few hundredths. <strong>|z| &gt; 1</strong> means the refits do
+          not scatter around the best fit — for example because they
+          converged to a different local minimum — and the uncertainty
+          cannot be trusted; CalEnEff then warns in the status bar, the
+          legend, the results file and the query log. Do <em>not</em>
+          "correct" the best fit with the MC mean or median: when the
+          offset comes from a different minimum, 2·best-fit − mean moves the
+          value further from the truth, not closer.</td></tr>
 </table>
 <div class='note'>
 <strong>Practical guidance:</strong>
-Report the best-fit value ± MC σ (1-σ, 68% coverage) as your efficiency
-value with uncertainty — inside the calibrated energy range only. Outside it
-both models extrapolate, can disagree by orders of magnitude, and CalEnEff
-flags such queries. The difference between the KRF and Radware curves is a
-model uncertainty that neither MC σ contains; where it exceeds MC σ, quote it
-separately.
-If the MC distribution is visibly asymmetric (check the residual panel),
-report the 16th and 84th percentiles of the sample as the ±1-σ interval
-instead of the standard deviation.
+Report the best-fit value with its +upper/−lower 1σ (68% coverage) — inside
+the calibrated energy range only. Outside it both models extrapolate, can
+disagree by orders of magnitude, and CalEnEff flags such queries. The
+difference between the KRF and Radware curves is a model uncertainty that
+neither band contains; where it exceeds the 1σ, quote it separately. The
+same holds for a second Radware solution: when the fit finds another
+minimum within Δχ²/B² &lt; 1 of the best one, the results file lists it and
+how far its curve departs — that ambiguity is not in the band either.
 For publication, also quote the Birge-scaled parameter uncertainties
 from the fit result table so reviewers can judge the goodness of fit.
 </div>

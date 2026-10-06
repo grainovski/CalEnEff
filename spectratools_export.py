@@ -67,18 +67,24 @@ def relative_efficiency_curves(engine, energies):
     engine.eff_peak, the very number the app's % mode uses, so the two agree.
     Outside the fitted range the curve is extrapolated and may exceed 1.
 
-    The deff columns are each model's MC spread times its own Birge ratio,
-    inflate-only (predict_efficiency applies it), matching the files
-    SpectraTools writes itself.
+    The eff columns are each model's BEST FIT, and the deff columns its
+    symmetric 1σ: half the MC 15.87–84.13 % quantile range times its own Birge
+    ratio, inflate-only -- the same rule as the app's band and queries
+    (predict_efficiency applies it), and SpectraTools writes scaled deff too.
+    (Up to v4.8 the eff columns were the MC mean, which on the v4.8 example
+    data sat 7 MC-σ off the Radware best fit.)
     """
     E = np.asarray(energies, dtype=float)
     if E.size <= EXPORT_KNOTS:
         knots = E
     else:
         knots = np.linspace(E.min(), E.max(), EXPORT_KNOTS)
-    cols = np.array([engine.predict_efficiency(k) for k in knots])
-    # columns of predict_efficiency: krf_mean, krf_std, _, rw_mean, rw_std, _
-    picked = cols[:, [0, 1, 3, 4]]
+    rows = []
+    for k in knots:
+        r = engine.predict_efficiency(k)
+        rows.append([r["krf"]["value"], r["krf"]["sigma"],
+                     r["rw"]["value"], r["rw"]["sigma"]])
+    picked = np.array(rows, dtype=float)
     # NOT the maximum over the export's own energies: those run from about
     # 0 keV to the top channel, so that maximum was an extrapolated hump below
     # the data (137 keV on the shipped set) and disagreed with the app by 2.1%.
@@ -93,6 +99,15 @@ def relative_efficiency_curves(engine, energies):
         out = np.column_stack([np.interp(E, knots, picked[:, j])
                                for j in range(4)])
     return out, 1.0 / peak
+
+
+def _fmt(v):
+    """'%.3f' for a finite number, 'n/a' otherwise."""
+    try:
+        v = float(v)
+    except (TypeError, ValueError):
+        return "n/a"
+    return "%.3f" % v if np.isfinite(v) else "n/a"
 
 
 def header(engine, source_name, norm, e_lo, e_hi, npeaks,
@@ -126,11 +141,17 @@ def header(engine, source_name, norm, e_lo, e_hi, npeaks,
     if rw is None or not len(rw):
         lines.append("Radware            : did not converge")
     else:
+        # The best fit -- the curve the eff_rw column holds.  This used to be
+        # the mean of the MC parameter sets, which is not a fit to anything.
         lines.append("Radware params     : %s"
-                     % ", ".join("%.12g" % v for v in np.nanmean(rw, axis=0)))
+                     % ", ".join("%.12g" % v for v in e.radware_popt))
     lines += [
         "Monte Carlo        : KRF %d accepted, Radware %d accepted, "
         "%d samples rejected" % (e.mc_krf_ok, e.mc_rw_ok, e.mc_bad),
+        "MC bias check      : KRF max|z| %s, Radware max|z| %s   (z = (MC "
+        "median - best fit) / MC sigma at the calibration lines; > 1 means "
+        "deff is unreliable)" % (_fmt(getattr(e, "krf_bias_z", None)),
+                                 _fmt(getattr(e, "rw_bias_z", None))),
         "energy calibration : Calibration(kind='linear', a=%r, b=%r, c=0.0)"
         % (a_cal, b_cal),
         "source             : %s" % source_name,

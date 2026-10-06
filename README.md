@@ -9,13 +9,16 @@ Interactive Tk/matplotlib tool that turns raw channel/peak data into
   independent models:
   * **KRF** — 4-parameter `ε(E) = (a·E + b/E) · exp(c·E + d/E)`
   * **Radware (5-parameter)** — following Radford's `effit.c`
-    procedure (C and G held fixed; Levenberg-Marquardt + parset-style
-    seed re-drawn for every Monte-Carlo iteration).
+    procedure (C and G held fixed; Levenberg-Marquardt, best fit chosen
+    over parset, polyfit and 60 deterministic random starts).
 * **a.u. ⇄ %** toggle — display the efficiency in arbitrary units or
   in percent, normalized to the KRF curve peak (the underlying fits
   stay unchanged; χ² is scale-invariant).
 
-All predictions ship with Birge-corrected 1 σ uncertainty bands.
+All predictions ship with Birge-corrected 1 σ uncertainty bands. Every
+efficiency value is the best fit; its 1 σ comes from the Monte-Carlo
+16/50/84 % quantiles, and a bias check warns when the Monte-Carlo refits do
+not scatter around the best fit.
 
 ---
 
@@ -144,14 +147,14 @@ instance: `wsl --install AlmaLinux-10 --name AlmaStock --no-launch`.
 ## Tests
 
 ```bash
-python verify/verify_v4.py     # 40 checks — engine, headless
-python verify/verify_gui.py    # 31 checks — real Tk widgets, needs a display, ~20 s
+python verify/verify_v4.py     # 51 checks — engine, headless
+python verify/verify_gui.py    # 33 checks — real Tk widgets, needs a display, ~20 s
 ```
 
 Both exit non-zero on failure and locate the repo from their own path, so
 they run unedited from any checkout.
 
-**Count the PASS lines, not the verdict.** Fewer than 40 and 31 means an
+**Count the PASS lines, not the verdict.** Fewer than 51 and 33 means an
 incomplete environment rather than a healthy project — a suite that silently
 collects fewer checks looks identical to success.
 
@@ -243,11 +246,22 @@ it matters when the automatic write failed, e.g. a read-only directory.
   best-fit popt.
 * **Radware 5-parameter efficiency** — Radford's `effit.c` form with
   `C = 0` and `G = 15` fixed, leaving `a₁, a₂, a₄, a₅, a₆` free.
-  Levenberg–Marquardt (Bevington CURFIT), `parset()` seed re-drawn
-  from every Monte-Carlo sample — exactly the Radford procedure.
+  Levenberg–Marquardt (Bevington CURFIT).  The best fit is the lowest χ²
+  over the `parset()` seed, a polyfit seed and 60 deterministic random
+  starts — the χ² surface has several minima.  Monte-Carlo refits are
+  warm-started from the best fit (a fixed start, so no chain bias) and
+  fall back to `parset()` only when that refit is rejected.  A second
+  minimum within Δχ²/B² < 1 is reported in the results file as a model
+  ambiguity.
 * **Birge ratio** `B = √(χ²/ndf)` is reported and used to scale the
   reported 1 σ band when the data scatter exceeds the stated σ
   ([reference](https://arxiv.org/html/2406.08293v3)).
+* **One rule for every efficiency uncertainty** — band, query, histogram
+  and SpectraTools export: value = best fit, 1 σ = `+B·(p84 − p50)` /
+  `−B·(p50 − p16)` from the Monte-Carlo quantiles.  The bias check
+  `z = (p50 − best fit)/((p84 − p16)/2)` at the calibration energies warns
+  above 1, as does a refit of the unperturbed data that fails to reproduce
+  the best fit.
 * **Channel → energy inversion** uses the cancellation-free (Citardauq)
   form of the quadratic root, so Monte-Carlo samples whose curvature term
   drifts near zero stay finite instead of diverging.

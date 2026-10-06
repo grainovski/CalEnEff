@@ -1,14 +1,17 @@
 """Engine test suite -- headless, no display required.
 
-40 checks over CalibrationEngine: the numerically stable quadratic inversion,
+51 checks over CalibrationEngine: the numerically stable quadratic inversion,
 input-file validation, a full 10 000-iteration calibration, Monte Carlo
 reproducibility, the empty-MC guard, the vectorised confidence bands, and --
 since the 2026-09-24 scientific audit -- in-range normalisation, Birge-scaled
-query uncertainties and the extrapolation flags.
+query uncertainties and the extrapolation flags; since 2026-10-06, that both
+MC ensembles are centred on their best fit (on the shipped AND the pre-v4.8
+dataset), that band and query follow one interval rule, and the Radware
+second-minimum report.
 
-    python verify/verify_v4.py        # expect 40 PASS, "ALL CHECKS PASSED"
+    python verify/verify_v4.py        # expect 51 PASS, "ALL CHECKS PASSED"
 
-Count the PASS lines, not the verdict: fewer than 40 means an incomplete
+Count the PASS lines, not the verdict: fewer than 51 means an incomplete
 environment, not a healthy project.  Exits non-zero on any failure.
 
 If your console is not UTF-8, run with PYTHONIOENCODING=utf-8 PYTHONUTF8=1 --
@@ -108,8 +111,10 @@ check("different input -> different result", r3[0] != r1[0], f"{r3[0]:.3f}")
 
 # ── 5. predict_efficiency ────────────────────────────────────────────────
 pe = eng.predict_efficiency(1000.0)
-check("predict_efficiency finite", np.isfinite(pe[0]) and np.isfinite(pe[1]),
-      f"KRF={pe[0]:.4g}+-{pe[1]:.4g}  RW={pe[3]:.4g}+-{pe[4]:.4g}")
+check("predict_efficiency finite",
+      all(np.isfinite(pe[m][k]) for m in ("krf", "rw") for k in ("value", "sigma")),
+      f"KRF={pe['krf']['value']:.4g}+-{pe['krf']['sigma']:.4g}  "
+      f"RW={pe['rw']['value']:.4g}+-{pe['rw']['sigma']:.4g}")
 # Wild extrapolation must not raise
 for Ex in (0.001, 1e6):
     try:
@@ -122,7 +127,9 @@ for Ex in (0.001, 1e6):
 saved = eng.params_eff
 eng.params_eff = np.empty((0, 4))
 try:
-    pe0 = eng.predict_efficiency(1000.0); ok = np.isnan(pe0[0])
+    pe0 = eng.predict_efficiency(1000.0)
+    # No MC samples: no uncertainty -- but the best fit itself is still known.
+    ok = np.isnan(pe0["krf"]["sigma"]) and np.isfinite(pe0["krf"]["value"])
 except Exception as ex:
     ok = False; pe0 = ex
 check("empty params_eff -> NaN not crash", ok, str(pe0)[:60])
@@ -179,11 +186,12 @@ check("CONTROL: Birge ratios > 1 here, so the checks below discriminate",
       eng.eff_birge > 1.0 and eng.birge1 > 1.0,
       f"KRF B={eng.eff_birge:.3f}  energy B1={eng.birge1:.1f}")
 _raw = G.f_krf(1000.0, *eng.params_eff.T)
-_raw_std = float(np.std(_raw[np.isfinite(_raw)]))
+_p16, _p84 = np.percentile(_raw[np.isfinite(_raw)], [15.87, 84.13])
+_s68 = 0.5 * (_p84 - _p16)
 _pe = eng.predict_efficiency(1000.0)
-check("efficiency query sigma = MC spread x Birge",
-      abs(_pe[1] - _raw_std * G._band_scale(eng.eff_birge)) < 1e-9 * _raw_std,
-      f"{_pe[1]:.5g} = {_raw_std:.5g} x {G._band_scale(eng.eff_birge):.4f}")
+check("efficiency query sigma = MC 68% half-width x Birge",
+      abs(_pe["krf"]["sigma"] - _s68 * G._band_scale(eng.eff_birge)) < 1e-9 * _s68,
+      f"{_pe['krf']['sigma']:.5g} = {_s68:.5g} x {G._band_scale(eng.eff_birge):.4f}")
 
 # Replicate predict()'s own draws at dch = 0: the whole spread is calibration.
 _rng = np.random.default_rng(G.SEED)
@@ -217,6 +225,88 @@ check("channel_outside_fit: inside/edges False, beyond True",
       and not eng.channel_outside_fit(eng.ch.max())
       and eng.channel_outside_fit(eng.ch.min() - 0.01)
       and eng.channel_outside_fit(eng.ch.max() + 0.01))
+
+# ── 12. MC centred on the best fit; one interval rule (2026-10-06) ───────
+# In v4.8 every Radware MC refit started from a fresh parset() seed and, on
+# the shipped data, converged 102 chi2 units above the best fit: the ensemble
+# sat 7.4 MC-sigma off the plotted curve at 843 keV and the band, drawn as
+# bf + B*(pct - bf), contained neither.  All 40 checks above passed anyway.
+def _worst_offset(e, which):
+    """max |MC mean - bf| / MC std over in-range reference energies."""
+    worst = 0.0
+    for x in (351.9, 609.3, 843.0, 1120.3, 1764.5, 2204.2):
+        if not e.E.min() <= x <= e.E.max():
+            continue
+        s, bf, _ = e._model_samples(which, x)
+        s = s[np.isfinite(s)]
+        worst = max(worst, abs(np.mean(s) - bf) / np.std(s))
+    return worst
+
+for _which, _name in (("krf", "KRF"), ("rw", "Radware")):
+    _w = _worst_offset(eng, _which)
+    check(f"{_name} MC centred on the best fit (|mean-bf| < 0.5 MC sigma)",
+          _w < 0.5, f"worst {_w:.3f} sigma")
+check("bias check passes for both models, no MC health warning",
+      eng.krf_bias_z < G.BIAS_Z_WARN and eng.rw_bias_z < G.BIAS_Z_WARN
+      and not eng.mc_health_warnings(),
+      f"max|z| KRF {eng.krf_bias_z:.3f}  Radware {eng.rw_bias_z:.3f}")
+check("MC refit of the unperturbed data reproduces the best fit",
+      abs(eng.krf_selfcheck_dchi2) < 1e-3 and abs(eng.rw_selfcheck_dchi2) < 1e-3,
+      f"dchi2 KRF {eng.krf_selfcheck_dchi2:.1e}  Radware {eng.rw_selfcheck_dchi2:.1e}")
+_m = (eng.eff_grid >= eng.E.min()) & (eng.eff_grid <= eng.E.max())
+check("both bands contain their best-fit curve over the data range",
+      all(np.all((b["lo"][_m] <= b["value"][_m]) & (b["value"][_m] <= b["hi"][_m]))
+          for b in (eng.band_krf, eng.band_rw)), f"{int(_m.sum())} grid points")
+_j = int(np.argmin(np.abs(eng.eff_grid - 843.0)))
+_qg = eng.predict_efficiency(float(eng.eff_grid[_j]))["rw"]
+check("query and band follow one rule (Radware, at a grid energy)",
+      abs(_qg["lo"] - eng.band_rw["lo"][_j]) <= 1e-9 * _qg["value"]
+      and abs(_qg["hi"] - eng.band_rw["hi"][_j]) <= 1e-9 * _qg["value"],
+      f"{eng.eff_grid[_j]:.1f} keV: {_qg['value']:.1f} "
+      f"+{_qg['plus']:.1f}/-{_qg['minus']:.1f}")
+_q = eng.predict_efficiency(843.0)["rw"]
+check("query value is the Radware best fit, not an MC statistic",
+      _q["value"] == float(G.f_radware_5p(843.0, *eng.radware_popt)),
+      f"843 keV: {_q['value']:.2f}  (MC median {_q['median']:.2f})")
+
+# Controls: the interval rule must flag a biased ensemble and must not let an
+# offset ensemble drag the interval off the best fit.
+_samp = np.random.default_rng(0).normal(10.0, 1.0, 10000)
+check("CONTROL: bias check flags an ensemble 3 sigma off the best fit",
+      G._mc_interval(_samp, 7.0, 1.0)["z"] > G.BIAS_Z_WARN
+      and abs(G._mc_interval(_samp, 10.0, 1.0)["z"]) < 0.05)
+_iv = G._mc_interval(_samp + 5.0, 10.0, 3.0)
+check("CONTROL: an offset ensemble cannot move the interval off the best fit",
+      _iv["lo"] < 10.0 < _iv["hi"] and abs(_iv["sigma"] - 3.0) < 0.1,
+      f"[{_iv['lo']:.2f}, {_iv['hi']:.2f}]  sigma {_iv['sigma']:.3f}")
+
+# The shipped data has a second Radware minimum (chi2 ~470, dchi2/B^2 = 0.70)
+# that the best-fit multistart must find and report, not mix into the band.
+_alt = eng.radware_alt
+check("Radware second minimum found and reported",
+      _alt is not None and 0.0 < _alt["dchi2_B2"] < 1.0,
+      "none" if _alt is None else
+      f"chi2 {_alt['chi2']:.2f}  dchi2/B^2 {_alt['dchi2_B2']:.2f}  "
+      f"max dev {_alt['max_dev']*100:+.1f}% at {_alt['at_E']:.0f} keV")
+
+# The pre-v4.8 dataset: there the Radware best fit lies on a flat (a1, a2)
+# valley, and a warm start ALONE loses half the refits past |p| < 500.  The
+# parset() fallback must keep acceptance up and the ensemble centred.  2 000
+# replicates keep this to a few seconds.
+_old = G.CalibrationEngine()
+_old.load(str(REPO / "verify" / "fixtures" / "226Ra_En_Area_pre_v4.8.txt"))
+_old.calibrate()
+_n_saved, G.N_MC_EFF = G.N_MC_EFF, 2000
+try:
+    _old.calibrate_efficiency()
+finally:
+    G.N_MC_EFF = _n_saved
+_w = _worst_offset(_old, "rw")
+check("pre-v4.8 data: Radware MC accepted and centred (parset fallback used)",
+      _old.mc_rw_ok >= 0.99 * 2000 and _old.mc_rw_fallback > 0 and _w < 0.5
+      and not _old.mc_health_warnings(),
+      f"ok {_old.mc_rw_ok}/2000, fallback {_old.mc_rw_fallback}, "
+      f"worst {_w:.3f} sigma, max|z| {_old.rw_bias_z:.3f}")
 
 print("\n" + ("ALL CHECKS PASSED" if not fails else f"FAILURES: {fails}"))
 sys.exit(1 if fails else 0)

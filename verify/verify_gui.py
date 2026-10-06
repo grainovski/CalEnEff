@@ -1,12 +1,12 @@
 """GUI test suite -- drives the real Tk widgets end to end.
 
-31 checks: load (including rejection of a malformed file), a full calibration
+33 checks: load (including rejection of a malformed file), a full calibration
 through the button handler, energy and efficiency queries, the a.u./% toggle,
 the theme switch, extrapolated queries that must not crash the plot AND must
 be flagged (with in-range controls that must not be), % mode reading 100 at
 the in-range peak, clear, and the contents of the generated results file.
 
-    python verify/verify_gui.py       # expect 31 PASS, "ALL GUI CHECKS PASSED"
+    python verify/verify_gui.py       # expect 33 PASS, "ALL GUI CHECKS PASSED"
 
 Needs a display: it really does construct the App (withdrawn, so nothing
 appears on screen).  Takes ~90 s -- it runs two real calibrations.
@@ -81,19 +81,25 @@ check("energy query reproducible in UI", app._lin_E_mc.get() == e_first,
 # ── efficiency query ────────────────────────────────────────────────────
 app.E_q_var.set("1000")
 app._query_eff()
-au_krf = app._eff_val_mc.get()
+au_krf = app._eff_val_bf.get()
 check("efficiency query filled", au_krf != "—", f"KRF={au_krf} a.u.")
+# The shown value is the best fit and the median row carries the bias check.
+check("query shows best fit, +/- 1 sigma and the median check",
+      float(au_krf) == float(f"{app.engine.predict_efficiency(1000.0)['krf']['value']:.5g}")
+      and app._eff_derr.get().startswith("+") and "/−" in app._eff_derr.get()
+      and "z=" in app._eff_rw_val_med.get(),
+      f"Δε {app._eff_derr.get()}  Radware median {app._eff_rw_val_med.get()}")
 _st_in_E = app.status_lbl["text"]
 
 # ── a.u. <-> % toggle (the refactored shared path) ──────────────────────
 t0 = time.time(); app._toggle_pct_mode(); t_tog = time.time() - t0
-pct_krf = app._eff_val_mc.get()
+pct_krf = app._eff_val_bf.get()
 check("toggle to % changed value", pct_krf != au_krf, f"{au_krf} -> {pct_krf} %")
 check("toggle button label flipped", "→ a.u." in app._pct_btn["text"],
       app._pct_btn["text"])
 t0 = time.time(); app._toggle_pct_mode(); t_tog2 = time.time() - t0
-check("toggle back restores a.u.", app._eff_val_mc.get() == au_krf,
-      f"{app._eff_val_mc.get()} == {au_krf}")
+check("toggle back restores a.u.", app._eff_val_bf.get() == au_krf,
+      f"{app._eff_val_bf.get()} == {au_krf}")
 print(f"\n  a.u./% toggle: {t_tog*1000:.0f} ms  and  {t_tog2*1000:.0f} ms "
       f"(full efficiency redraw each time)\n", flush=True)
 
@@ -133,7 +139,10 @@ app._toggle_pct_mode()
 # ── clear ───────────────────────────────────────────────────────────────
 app._clear_all()
 check("clear resets energy labels", app._lin_E_mc.get() == "—")
-check("clear resets efficiency labels", app._eff_val_mc.get() == "—")
+check("clear resets efficiency labels",
+      all(v.get() == "—" for v in (app._eff_val_bf, app._eff_derr,
+                                   app._eff_val_med, app._eff_rw_val_bf,
+                                   app._eff_rw_derr, app._eff_rw_val_med)))
 
 # ── results file was written ────────────────────────────────────────────
 check("results file written", app._res_file and os.path.isfile(app._res_file),
@@ -142,6 +151,10 @@ if app._res_file and os.path.isfile(app._res_file):
     txt = open(app._res_file, encoding="utf-8").read()
     check("results file has energy params", "ENERGY CALIBRATION PARAMETERS" in txt)
     check("results file has Radware block", "Radware (5-param" in txt)
+    check("results file reports the MC checks and the second minimum",
+          txt.count("MC check") >= 2 and "Second minimum" in txt
+          and "ε(MC mean)" not in txt and "bias check z" in txt,
+          f"{txt.count('MC check')} MC-check lines")
     check("results file logged queries", txt.count("ENERGY QUERY") >= 1,
           f"{txt.count('ENERGY QUERY')} energy, {txt.count('EFFICIENCY QUERY')} eff")
     # three out-of-range queries were made (E=1, E=50000, ch=99999)
