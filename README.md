@@ -151,14 +151,14 @@ instance: `wsl --install AlmaLinux-10 --name AlmaStock --no-launch`.
 ## Tests
 
 ```bash
-python verify/verify_v4.py     # 60 checks — engine, headless
+python verify/verify_v4.py     # 61 checks — engine, headless
 python verify/verify_gui.py    # 35 checks — real Tk widgets, needs a display, ~20 s
 ```
 
 Both exit non-zero on failure and locate the repo from their own path, so
 they run unedited from any checkout.
 
-**Count the PASS lines, not the verdict.** Fewer than 60 and 35 means an
+**Count the PASS lines, not the verdict.** Fewer than 61 and 35 means an
 incomplete environment rather than a healthy project — a suite that silently
 collects fewer checks looks identical to success.
 

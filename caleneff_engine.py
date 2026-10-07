@@ -170,6 +170,13 @@ def _finite_mean_std(x, min_n=1):
     return float(np.mean(v)), float(np.std(v))
 
 
+def _finite_median(x, min_n=1):
+    """Median of the finite entries of x; nan if fewer than min_n remain."""
+    v = np.asarray(x, dtype=float)
+    v = v[np.isfinite(v)]
+    return float(np.median(v)) if v.size >= max(min_n, 1) else float("nan")
+
+
 def _band_scale(birge):
     """Factor for widening an uncertainty band by a Birge ratio -- never below 1.
 
@@ -1171,6 +1178,10 @@ class CalibrationEngine:
     def predict(self, ch_val, dch_val):
         """Invert ch(E) at ch₀ ± Δch₀ by Monte Carlo.
 
+        Returns (E_lin_median, σ_lin, E_quad_median, σ_quad, E_lin_bf,
+        E_quad_bf).  The best fits are the values to report; the MC medians
+        are checks, as for efficiency queries.
+
         Seeded from SEED so re-querying the same channel reproduces the same
         numbers: every query is appended to the _Res.txt log, and two identical
         queries disagreeing there would be indistinguishable from a real change.
@@ -1205,8 +1216,12 @@ class CalibrationEngine:
             E_lin_cal = (ch_val - a1) / b1
         E_quad_cal = _invert_quadratic(pq[:, 0], pq[:, 1], pq[:, 2],
                                        ch_val, E_lin_cal)
-        El, sl = _finite_mean_std(E_lin)
-        Eq, sq = _finite_mean_std(E_quad)
+        _, sl = _finite_mean_std(E_lin)
+        _, sq = _finite_mean_std(E_quad)
+        # The check value is the MC MEDIAN, as for efficiency queries: robust
+        # to the odd runaway sample, and the same statistic everywhere.
+        El = _finite_median(E_lin)
+        Eq = _finite_median(E_quad)
         sl = _inflate_calibration_part(sl, _finite_mean_std(E_lin_cal)[1],
                                        _band_scale(self.birge1))
         sq = _inflate_calibration_part(sq, _finite_mean_std(E_quad_cal)[1],

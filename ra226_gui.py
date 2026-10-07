@@ -175,8 +175,8 @@ _EFF_CAL_TIP = (
 
 # Per-row result tooltips (energy)
 _TIP_E_MC = (
-    "MC mean energy -- a CHECK, not the result.\n"
-    "Mean of 10,000 MC inversions; it should agree\n"
+    "MC median energy -- a CHECK, not the result.\n"
+    "Median of 10,000 MC inversions; it should agree\n"
     "with the best fit to well within ΔE.\n"
     "Each trial draws ch₀ from N(ch₀, Δch₀) and\n"
     "samples calibration parameters from their MC\n"
@@ -920,7 +920,7 @@ class App(tk.Tk):
 
     def _result_block(self, parent, tag, color):
         """
-        3 rows: MC mean, MC σ, best-fit.  Each row = value + italic hint.
+        3 rows: best fit, 1σ, MC median.  Each row = value + italic hint.
         Tooltips on both the label and the (wider) hint label.
         """
         rows = [
@@ -928,7 +928,7 @@ class App(tk.Tk):
              "inversion of ch(E) — report", _TIP_E_BF),
             ("ΔE  (1σ)",       "dE",   "keV",
              "σ of 10k MC draws",           _TIP_DE),
-            ("MC mean",        "E_mc", "keV",
+            ("MC median",      "E_mc", "keV",
              "check only",                  _TIP_E_MC),
         ]
         for i, (lbl, key, unit, hint, tip) in enumerate(rows):
@@ -1580,9 +1580,9 @@ class App(tk.Tk):
             f"  ch₀ = {ch_val:.4f}   Δch₀ = {dch_val:.4f}\n"
             f"{rng_note}"
             f"  Linear:    E = {El_bf_str} ± {dEl:.4f} keV (best fit)"
-            f"   MC mean = {El:.4f} keV (check)\n"
+            f"   MC median = {El:.4f} keV (check)\n"
             f"  Quadratic: E = {Eq_bf_str} ± {dEq:.4f} keV (best fit)"
-            f"   MC mean = {Eq:.4f} keV (check)\n"
+            f"   MC median = {Eq:.4f} keV (check)\n"
             f"  σ: calibration share × Birge (B1={e.birge1:.4g}, B2={e.birge2:.4g})."
             f"  Fit RMS residual ≈ {rms_lin:.4f} keV (lin), "
             f"{rms_quad:.4f} keV (quad)\n\n")

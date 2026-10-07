@@ -1,6 +1,6 @@
 """Engine test suite -- headless, no display required.
 
-60 checks over CalibrationEngine: the numerically stable quadratic inversion,
+61 checks over CalibrationEngine: the numerically stable quadratic inversion,
 input-file validation, a full 10 000-iteration calibration, Monte Carlo
 reproducibility, the empty-MC guard, the vectorised confidence bands, and --
 since the 2026-09-24 scientific audit -- in-range normalisation, Birge-scaled
@@ -9,9 +9,9 @@ MC ensembles are centred on their best fit (on the shipped AND the pre-v4.8
 dataset), that band and query follow one interval rule, and the Radware
 second-minimum report.
 
-    python verify/verify_v4.py        # expect 60 PASS, "ALL CHECKS PASSED"
+    python verify/verify_v4.py        # expect 61 PASS, "ALL CHECKS PASSED"
 
-Count the PASS lines, not the verdict: fewer than 60 means an incomplete
+Count the PASS lines, not the verdict: fewer than 61 means an incomplete
 environment, not a healthy project.  Exits non-zero on any failure.
 
 If your console is not UTF-8, run with PYTHONIOENCODING=utf-8 PYTHONUTF8=1 --
@@ -203,6 +203,17 @@ _r0 = eng.predict(2000.0, 0.0)
 check("energy query sigma (dch=0) = B1 x calibration spread",
       abs(_r0[1] - G._band_scale(eng.birge1) * _cal) < 1e-9 * max(_r0[1], 1e-12),
       f"{_r0[1]:.6g} keV = {G._band_scale(eng.birge1):.4g} x {_cal:.4g}")
+# The energy query's check value is the MC MEDIAN (v4.10.1), as for
+# efficiency queries -- not the mean.  Replicate predict()'s own draws.
+_rng = np.random.default_rng(G.SEED)
+_chm = _rng.normal(2000.0, 0.5, G.N_MC_PRED)
+_idx = _rng.integers(0, G.N_MC_CAL, G.N_MC_PRED)
+_pl = eng.params_lin[_idx]
+_El = (_chm - _pl[:, 0]) / _pl[:, 1]
+_r = eng.predict(2000.0, 0.5)
+check("energy query check value is the MC median, not the mean",
+      _r[0] == float(np.median(_El)) and _r[0] != float(np.mean(_El)),
+      f"median {np.median(_El):.6f}  mean {np.mean(_El):.6f}  reported {_r[0]:.6f}")
 # With a large dch, the user's own uncertainty must NOT be inflated by B1.
 _dch = 5.0
 _expect = float(np.hypot(G._band_scale(eng.birge1) * _cal, _dch / eng.popt1[1]))

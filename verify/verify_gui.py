@@ -78,9 +78,9 @@ app._calculate()
 check("energy query reproducible in UI", app._lin_E_mc.get() == e_first,
       f"{e_first} == {app._lin_E_mc.get()}")
 _q = app.engine.predict(2000.0, 0.5)
-check("energy query reports the best fit; MC mean is the check row",
+check("energy query reports the best fit; MC median is the check row",
       app._lin_E_bf.get() == f"{_q[4]:.4f}" and app._lin_E_mc.get() == f"{_q[0]:.4f}",
-      f"best fit {app._lin_E_bf.get()}  MC mean {app._lin_E_mc.get()}")
+      f"best fit {app._lin_E_bf.get()}  MC median {app._lin_E_mc.get()}")
 
 # ── efficiency query ────────────────────────────────────────────────────
 app.E_q_var.set("1000")

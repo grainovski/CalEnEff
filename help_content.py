@@ -194,7 +194,7 @@ press <kbd>Enter</kbd> or <strong>⟶ Calculate Energy</strong>. For the
 linear and the quadratic calibration you get the <strong>best-fit</strong>
 energy (the value to report), its <strong>1σ</strong> (your Δch₀ plus the
 calibration's own uncertainty, the latter scaled by <em>B</em>), and the
-Monte Carlo mean as a check. A channel outside the calibrated range is
+Monte Carlo median as a check. A channel outside the calibrated range is
 flagged as extrapolated.</p>
 
 <h2>5 — Efficiency at an energy</h2>
@@ -410,27 +410,114 @@ its statistical minimum σ_peak/√N.</p>
 
 <!-- ── Birge ratio ────────────────────────────────────────────── -->
 <h2>Birge ratio</h2>
-<div class='formula'>B = √( χ²/ndf )     ndf = n − p</div>
+<div class='formula'>B = √( χ²/ndf )     χ² = Σ ( (yᵢ − f(xᵢ; θ̂)) / σᵢ )²     ndf = n − p</div>
+<p>The Birge ratio (R. T. Birge, <em>Phys. Rev.</em> 40 (1932) 207) compares
+the scatter of the points about the fitted curve with the uncertainties you
+stated for them. If the model is right and every σᵢ is a true 1σ, each
+residual is on average σᵢ in size, χ² averages ndf, and B ≈ 1. B is
+therefore a single number answering one question: <em>are the stated
+uncertainties consistent with how far the points actually lie from the
+curve?</em></p>
+
+<h3>How close to 1 is "1"?</h3>
+<p>Even with a perfect model and honest uncertainties, B fluctuates from one
+measurement to the next. Its spread is about 1/√(2·ndf):</p>
+<table>
+  <tr><th>ndf</th><th>typical B (68 %)</th><th>B still plausible by chance (95 %)</th></tr>
+  <tr><td>5</td><td>0.7 – 1.3</td><td>up to ≈ 1.5</td></tr>
+  <tr><td>10</td><td>0.8 – 1.2</td><td>up to ≈ 1.4</td></tr>
+  <tr><td>20</td><td>0.85 – 1.15</td><td>up to ≈ 1.3</td></tr>
+</table>
+<p>So B = 1.2 on a 23-line calibration says nothing; B = 1.8 does. With very
+few points (a 5-line Radware fit has ndf = 0) B is undefined or meaningless,
+and CalEnEff says so in the results file.</p>
+
+<h3>What a large B means</h3>
 <table>
   <tr><th>B value</th><th>Meaning</th></tr>
   <tr><td>B ≈ 1</td>
-      <td>Model fits well; input uncertainties are realistic</td></tr>
+      <td>The model describes the data and the stated uncertainties are
+          realistic. The statistical uncertainties can be used as they
+          are.</td></tr>
   <tr><td>B &gt; 1</td>
-      <td>Residuals exceed expectation: model inadequate or σᵢ underestimated.
-          CalEnEff inflates all reported uncertainties by B. That assumes
-          the excess scatter is random: if the residuals follow a smooth
-          pattern, the error at a given energy can be several times the
-          B-scaled value.</td></tr>
+      <td>The points scatter more than their uncertainties allow. One or
+          more of: (1) the σᵢ are <strong>too small</strong> — a peak area
+          quoted better than √N, a centroid better than σ_peak/√N, a
+          reference energy treated as exact; (2) the <strong>model is
+          inadequate</strong> — ADC non-linearity a polynomial cannot
+          follow, an efficiency shape the function cannot take; (3) a
+          <strong>systematic effect</strong> acts on some lines —
+          true-coincidence summing, a wrong emission probability, an
+          interfering peak; (4) a single <strong>outlier</strong>.</td></tr>
   <tr><td>B &lt; 1</td>
-      <td>σᵢ overestimated or very few points. Statistical uncertainties
-          are used as-is.</td></tr>
+      <td>The points agree better than their uncertainties suggest: the σᵢ
+          are conservative, or there are too few points for B to mean much.
+          CalEnEff does <em>not</em> shrink anything in this case (see
+          below).</td></tr>
 </table>
-<div class='note'><strong>Rule of thumb:</strong> B > 2 is a warning sign.
-For energy calibration, try the Quadratic model or review centroid
-uncertainties. For efficiency, review the peak-area uncertainties and
-check for outliers in the residual plot. The commonest cause of a large B
-is an input uncertainty that is physically too small: a peak area quoted
-better than √N, or a centroid better than σ_peak/√N.</div>
+
+<h3>How CalEnEff uses it</h3>
+<p>When B &gt; 1, every reported uncertainty is multiplied by B: the
+Birge-scaled parameter uncertainties in the results table, the plotted 1σ
+bands and the query results. This is the standard "scale factor" practice
+(the Particle Data Group's S factor): it amounts to saying that the true
+uncertainties of the points were B times larger than stated, uniformly,
+and re-deriving the result's uncertainty on that basis.</p>
+<ul>
+  <li><strong>Inflate only.</strong> B &lt; 1 is treated as 1. Shrinking the
+      interval below what the stated uncertainties imply has no
+      statistical justification — with few points a small B is often
+      luck — so it would understate the uncertainty.</li>
+  <li><strong>Each model has its own B</strong>: linear and quadratic energy
+      fits, KRF and Radware efficiency fits are scaled independently.</li>
+  <li><strong>Energy queries</strong> scale only the calibration's share of
+      the uncertainty, σ² = σ_total² + (B² − 1)·σ_cal². The Δch₀ you type is
+      your own measurement and is not inflated.</li>
+  <li><strong>Efficiency queries and bands</strong> scale the Monte Carlo
+      spread. This was checked against the alternative of re-running the
+      Monte Carlo with every input uncertainty multiplied by B: the two
+      agree within 1 % for KRF and within 3–8 % for Radware.</li>
+</ul>
+
+<h3>What Birge scaling cannot fix</h3>
+<p>Scaling by B assumes the excess scatter is <strong>random and the same
+everywhere</strong>. When it is systematic, B tells you that something is
+wrong but the scaled uncertainty is in the wrong places: too large at lines
+that fit well, too small at the lines that cause the problem. Look at the
+residual plot:</p>
+<ul>
+  <li><strong>Residuals scattered randomly about zero</strong> — B is
+      plausibly underestimated uncertainties; Birge scaling is appropriate.</li>
+  <li><strong>Residuals following a smooth pattern</strong> (a wave, a
+      trend at one end) — the model is inadequate. The real error at an
+      energy is closer to the fit's RMS residual, which CalEnEff logs with
+      every energy query.</li>
+  <li><strong>A few lines far off, the rest fine</strong> — a systematic
+      effect on those lines. For Ra-226 the usual cause is true-coincidence
+      summing: lines fed through cascades sit above the curve at close
+      geometry. Correct the effect, or remove the affected lines, rather
+      than rely on B.</li>
+</ul>
+<p>CalEnEff adds a note to the results file when B &gt; 3, where systematic
+scatter is the likely explanation.</p>
+
+<h3>Examples from the bundled dataset</h3>
+<ul>
+  <li><strong>Energy, B₁ = 1.80.</strong> The reference energies are treated
+      as exact by default. Giving them a realistic uncertainty in the
+      optional 8th column (ΔE = 0.02 keV) brings B₁ to 1.18 — the "excess"
+      was the energy uncertainty that had been left out.</li>
+  <li><strong>Efficiency, B ≈ 5.</strong> The lines fed through two-step
+      cascades sit 6–7 % above the curve: uncorrected coincidence summing,
+      a systematic effect. The bands are widened ×5 as if it were random;
+      for those lines in particular, the band is not a reliable
+      uncertainty.</li>
+</ul>
+<div class='note'><strong>Rule of thumb:</strong> compare B with the table
+above before acting on it. If it is clearly too large, check the input
+uncertainties first — the commonest cause is an uncertainty that is
+physically too small — then the residual plot for a pattern or outliers.
+Quote B (or χ²/ndf) with your result so readers can judge the fit.</div>
 
 <!-- ── Efficiency calibration ─────────────────────────────────── -->
 <h2>Efficiency calibration</h2>
@@ -579,6 +666,83 @@ how far its curve departs — that ambiguity is not in the band either.
 For publication, also quote the Birge-scaled parameter uncertainties
 from the fit result table so reviewers can judge the goodness of fit.
 </div>
+<h3>Why the best fit is the result and the MC median only a check</h3>
+<p>Every query — energy and efficiency — shows three numbers in the same
+order: the <strong>best fit</strong>, its <strong>1σ</strong>, and the
+<strong>Monte Carlo median</strong>. The order is deliberate: the best fit
+is the measurement, the Monte Carlo tells you how uncertain it is, and the
+median confirms that this uncertainty is about the value reported.</p>
+
+<p><strong>1. The best fit is the estimate the data support.</strong>
+It is the curve that minimises χ² on your measured points — the
+least-squares estimate, which for Gaussian errors is also the
+maximum-likelihood estimate. The χ², the Birge ratio, the residual plot and
+the drawn curve all belong to it, and it is deterministic: the same file
+always gives the same number.</p>
+
+<p><strong>2. The Monte Carlo measures uncertainty; it does not improve the
+estimate.</strong> It is a parametric bootstrap: it takes your
+already-noisy data, adds noise again 10 000 times, and refits each time.
+That answers one question — <em>if the measurement were repeated, how much
+would the result scatter?</em> — and its <strong>spread</strong> becomes
+the 1σ. Its <strong>centre</strong> is not closer to the truth. Each
+replicate is (truth + your measurement's noise) + fresh simulated noise, so
+the ensemble is centred on your best fit, not on the true curve. Taking its
+median as the result would not remove your measurement's error; at best it
+reproduces the best fit, at worst it adds a bias of the fitting procedure
+on top.</p>
+
+<p><strong>3. A median curve is not a curve of the model.</strong> The
+median at 300 keV and the median at 2000 keV generally come from different
+replicates. Joined point by point they form a curve that no single set of
+KRF or Radware parameters produces. The best fit is always a genuine curve
+of the model, with one set of parameters you can quote.</p>
+
+<p><strong>4. What the median is for: checking the uncertainty.</strong>
+The difference between median and best fit estimates the bias of the
+fitting procedure itself. CalEnEff turns it into a bias check,
+z = (median − best fit) / σ<sub>MC</sub>:</p>
+<ul>
+  <li><strong>|z| of a few hundredths</strong> — the usual case. The refits
+      scatter around the best fit, so the spread describes uncertainty
+      <em>about the reported value</em>, and the 1σ can be quoted with
+      it.</li>
+  <li><strong>|z| &gt; 1</strong> — something is wrong and the 1σ is not
+      reliable; CalEnEff warns in the status bar, the plot legend, the
+      results file and the query log. Version 4.8 is the example: the
+      Radware refits had converged to a different solution from the plotted
+      curve, and z was 8.65. Had the median been promoted to "the result",
+      the app would have reported that wrong solution — 10 187 instead of
+      9 750 at 843 keV.</li>
+</ul>
+
+<p><strong>5. Why the median and not the mean.</strong> Both describe the
+centre of the Monte Carlo distribution and agree when it is symmetric. They
+part when it is skewed — typically when a curve is extrapolated beyond the
+calibration lines — or when a few refits run away: those drag the mean (and
+the standard deviation) far more than the median. The median is also the
+50 % point of the same 15.87/50/84.13 % quantiles the 1σ is built from, so
+value, interval and check use one set of statistics.</p>
+
+<p><strong>6. Why not "correct" the best fit with the median?</strong>
+Textbook bias correction, 2·best fit − median, works only when the offset is
+a small, smooth statistical bias. A large offset almost always means a
+convergence or model problem, and the "correction" then moves the value
+further from the truth — in version 4.8 by 438 units at 843 keV, the wrong
+way. When the offset is small, as it is when |z| is small, the correction is
+negligible anyway. Either way there is nothing to gain.</p>
+
+<p><strong>7. The evidence.</strong> The construction was tested for
+frequentist coverage: 120 synthetic datasets drawn from a known true curve
+with the stated uncertainties, each calibrated by CalEnEff. The interval
+<em>best fit ± 1σ</em> contained the truth 67.5–71.7 % of the time for KRF
+and 69–77 % for Radware, against the 68.3 % a correct 1σ interval should
+give.</p>
+
+<div class='note'><strong>In short:</strong> report the best fit with its
+1σ; glance at the MC median (or z) to confirm the two agree; never report
+the median instead.</div>
+
 <p>Reference: Tellinghuisen, J., "Statistical Error Propagation,"
 <em>J. Phys. Chem. A</em> 105 (2001) 3917–3921.</p>
 
