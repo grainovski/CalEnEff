@@ -15,15 +15,16 @@ Workflow:
      Right-click figure margin → Save As full figure
   7. ☀ / 🌙 button (top-right) → light / dark theme
 
-File columns (7, no index, ABSOLUTE uncertainties):
-  ch  delta_ch  N  delta_N  E[keV]  I[%]  delta_I[%]
+File columns (7, no index, ABSOLUTE uncertainties; optional 8th delta_E):
+  ch  delta_ch  N  delta_N  E[keV]  I[%]  delta_I[%]  [delta_E keV]
+
+The calculations live in caleneff_engine.py; this module is the window.
 """
 
-import os, sys, shutil, tempfile, webbrowser, datetime, warnings
+import os, sys, shutil, tempfile, webbrowser, datetime
 import numpy as np
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, simpledialog
-from scipy.optimize import curve_fit, OptimizeWarning
 
 # Writing the SpectraTools export lives in its own module: it needs no Tk and
 # is therefore importable and testable without a display.  It MUST stay listed
@@ -31,48 +32,24 @@ from scipy.optimize import curve_fit, OptimizeWarning
 # list and would otherwise ship a DEB and RPM that cannot import it.
 import spectratools_export
 
-# curve_fit raises OptimizeWarning when it cannot estimate the covariance.
-# The MC loops discard pcov entirely and skip any sample whose parameters come
-# back non-finite, so 10 000 iterations would flood stderr with warnings the
-# code already handles.  Where pcov *is* used (the energy best-fit) a failed
-# estimate still shows up as inf in the results file, so nothing is hidden.
-warnings.filterwarnings("ignore", category=OptimizeWarning)
 import matplotlib
 matplotlib.use("TkAgg")
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
 import matplotlib.pyplot as _plt
 
-# ── Settings ───────────────────────────────────────────────────────────────────
-N_MC_CAL  =  10_000
-N_MC_PRED =  10_000
-N_MC_EFF  =  10_000
-SEED      = 42
-
-# Points on the energy grid the efficiency bands are evaluated on.  The bands
-# are computed ONCE per calibration from every accepted MC sample and cached on
-# the engine, so redraws (a.u./% toggle, theme switch) cost nothing and the
-# band and a query at the same energy come from the same samples.
-EFF_GRID_N = 400
-
-# Bias check.  z = (MC median − best fit) / (unscaled MC 68 % half-width) at
-# each calibration energy.  A healthy parametric bootstrap gives |z| of a few
-# hundredths (≤ 0.17 measured on every healthy ensemble); the Radware ensemble
-# of v4.8, whose refits converged to a different local minimum, gave 8.65.
-# Above 1 the best fit lies outside the unscaled MC 68 % interval, so the MC
-# spread no longer describes scatter about the reported value.
-BIAS_Z_WARN = 1.0
-
-# Extra deterministic starting points for the Radware best fit, on top of the
-# parset and polyfit seeds.  The χ² surface has several local minima; on the
-# v4.8 example data parset alone lands 102 χ² units above the global one.
-N_RW_EXTRA_STARTS = 60
-
-# Minimum number of calibration points.  The quadratic energy fit has 3 free
-# parameters, so ndf = n − 3 > 0 requires n ≥ 4; below that the Birge ratio
-# divides by zero.  The efficiency models need more (KRF 4, Radware 5) and are
-# guarded individually rather than blocking the load.
-MIN_POINTS = 4
+# The calculation engine (no Tk).  Re-exported here so `import ra226_gui`
+# keeps working for scripts and tests; patch module constants such as
+# N_MC_EFF on caleneff_engine itself, which is where the engine reads them.
+import caleneff_engine
+from caleneff_engine import (
+    BIAS_Z_WARN, CalibrationEngine, EFF_GRID_N, MIN_POINTS, N_MC_CAL,
+    N_MC_EFF, N_MC_PRED, N_RW_EXTRA_STARTS, SEED, _band_scale, _batch_wls,
+    _birge, _curve_peak_in_range, _distinct_curve, _finite_mean_std,
+    _inflate_calibration_part, _invert_quadratic, _krf_p0, _mc_interval,
+    _multistart, _nan_interval, _radware_extra_starts, _radware_p0,
+    _radware_p0_5p, _radware_p0_polyfit, _rows, _scale_interval, _wls, f_krf,
+    f_lin, f_quad, f_radware, f_radware_5p)
 
 # Figure save formats — used by every right-click "Save as …" dialog.
 # Matplotlib backends actually supported: png, pdf, svg, eps, ps, jpg/jpeg,
@@ -198,7 +175,9 @@ _EFF_CAL_TIP = (
 
 # Per-row result tooltips (energy)
 _TIP_E_MC = (
-    "MC mean energy: mean of 10,000 MC inversions.\n"
+    "MC mean energy -- a CHECK, not the result.\n"
+    "Mean of 10,000 MC inversions; it should agree\n"
+    "with the best fit to well within ΔE.\n"
     "Each trial draws ch₀ from N(ch₀, Δch₀) and\n"
     "samples calibration parameters from their MC\n"
     "distribution, then inverts ch(E) to find E."
@@ -217,7 +196,7 @@ _TIP_E_BF = (
     "calibration curve at the input channel ch₀.\n\n"
     "  Linear:    E = (ch₀ − a) / b\n"
     "  Quadratic: solve  a + b·E + c·E² = ch₀\n\n"
-    "Use the MC σ row above as the uncertainty."
+    "This is the value to report, with ΔE below."
 )
 # Per-row result tooltips (efficiency — KRF)
 _TIP_EFF_BF = (
@@ -269,391 +248,6 @@ _TIP_RAD_MED = (
 def _ns(x, fmt=".5g"):
     """Format a float as a fixed-width string, or '—' if non-finite / non-numeric."""
     return (f"{x:{fmt}}" if isinstance(x, float) and np.isfinite(x) else "—")
-
-
-def _mc_interval(samples, bf, birge, min_n=10):
-    """The ONE rule for an efficiency value and its 1σ, used by the plotted
-    band, the query, the histogram and the export alike.
-
-    samples : MC values, shape (n_samples,) or (n_samples, n_grid)
-    bf      : the best-fit value(s), scalar or shape (n_grid,)
-    birge   : the model's Birge ratio; scaled inflate-only via _band_scale
-
-    Returns a dict of arrays (or floats for 1-D input):
-        value  = bf                       -- the reported value
-        minus  = B·(p50 − p16)            -- lower 1σ
-        plus   = B·(p84 − p50)            -- upper 1σ
-        lo, hi = value − minus, value + plus
-        sigma  = B·(p84 − p16)/2          -- symmetric summary
-        median = p50,  p16, p84           -- the raw (unscaled) MC quantiles
-        z      = (p50 − bf) / ((p84 − p16)/2)   -- bias check, unscaled
-        B, n   = scale factor used, number of finite samples
-
-    Centred on the best fit with half-widths measured from the MC MEDIAN, so a
-    residual offset between ensemble and best fit can never move the interval
-    (the old band, bf + B·(percentile − bf), moved by B × that offset) and the
-    best fit is always inside it.  Percentiles rather than the std keep any
-    asymmetry and ignore the odd runaway refit.  Entries with fewer than
-    `min_n` finite samples are NaN.  Non-finite samples are masked first:
-    KRF's exp(d/E) overflows and Radware's log-polynomial diverges far outside
-    the fitted range, and np.nanpercentile ignores NaN but not inf.
-    """
-    s = np.asarray(samples, dtype=float)
-    scalar = s.ndim == 1
-    if scalar:
-        s = s[:, None]
-    bf = np.broadcast_to(np.asarray(bf, dtype=float), s.shape[1:]).astype(float)
-    finite = np.isfinite(s)
-    n = finite.sum(axis=0)
-    with np.errstate(invalid="ignore"), warnings.catch_warnings():
-        warnings.simplefilter("ignore", RuntimeWarning)  # all-NaN columns
-        if finite.all():
-            p16, p50, p84 = np.percentile(s, [15.87, 50.0, 84.13], axis=0)
-        else:
-            p16, p50, p84 = np.nanpercentile(np.where(finite, s, np.nan),
-                                             [15.87, 50.0, 84.13], axis=0)
-        bad = (n < max(min_n, 1)) | ~np.isfinite(bf)
-        p16, p50, p84 = (np.where(bad, np.nan, p) for p in (p16, p50, p84))
-        B = _band_scale(birge)
-        s68 = 0.5 * (p84 - p16)
-        minus, plus = B * (p50 - p16), B * (p84 - p50)
-        value = np.where(bad, np.nan, bf)
-        z = np.where(s68 > 0, (p50 - bf) / np.where(s68 > 0, s68, 1.0), np.nan)
-    out = dict(value=value, minus=minus, plus=plus,
-               lo=value - minus, hi=value + plus, sigma=B * s68,
-               median=p50, p16=p16, p84=p84, z=z, n=n)
-    if scalar:
-        out = {k: (float(v[0]) if k != "n" else int(v[0])) for k, v in out.items()}
-    out["B"] = float(B)
-    return out
-
-
-def _scale_interval(iv, sc):
-    """An _mc_interval dict with every efficiency value multiplied by sc
-    (a.u. → %).  z, n and B are ratios or counts and stay as they are."""
-    return {k: (v * sc if k not in ("z", "n", "B") else v)
-            for k, v in iv.items()}
-
-
-def _nan_interval():
-    """_mc_interval's result when there is nothing to evaluate."""
-    nan = float("nan")
-    return dict(value=nan, minus=nan, plus=nan, lo=nan, hi=nan, sigma=nan,
-                median=nan, p16=nan, p84=nan, z=nan, n=0, B=1.0)
-
-
-def _rows(mask, limit=10):
-    """1-based row numbers where `mask` is True, truncated for readability."""
-    idx   = np.flatnonzero(mask) + 1
-    shown = ", ".join(str(i) for i in idx[:limit])
-    return shown + (f" … (+{len(idx)-limit} more)" if len(idx) > limit else "")
-
-
-def _finite_mean_std(x, min_n=1):
-    """(mean, std) over the finite entries of x; (nan, nan) if too few remain.
-
-    Used instead of np.nanmean/np.nanstd because an inverted calibration curve
-    can produce ±inf as well as NaN, and the nan* functions propagate inf.
-    `min_n` sets how many finite samples are required before the σ is
-    considered meaningful at all.
-    """
-    v = np.asarray(x, dtype=float)
-    v = v[np.isfinite(v)]
-    if v.size < max(min_n, 1):
-        return float("nan"), float("nan")
-    return float(np.mean(v)), float(np.std(v))
-
-
-def _band_scale(birge):
-    """Factor for widening an uncertainty band by a Birge ratio -- never below 1.
-
-    A Birge ratio under 1 means the quoted sigma were conservative relative to
-    the observed scatter. Scaling a band by such a ratio would make the reported
-    interval NARROWER than the Monte Carlo spread it was derived from, which
-    understates the uncertainty and has no statistical justification. Inflate
-    only: B > 1 widens, B <= 1 leaves the band as the MC produced it.
-
-    None and NaN (an un-run or degenerate fit) also return 1.0, so a band is
-    never silently scaled by a missing number.
-    """
-    try:
-        b = float(birge)
-    except (TypeError, ValueError):
-        return 1.0
-    return b if b > 1.0 else 1.0
-
-
-def _inflate_calibration_part(total, cal, B):
-    """Inflate only the calibration share of a Monte Carlo spread by B.
-
-    A query's MC spread mixes two independent sources: the calibration's own
-    parameter uncertainty (cal) and the uncertainty of the queried value itself
-    (e.g. the channel's Δch).  A Birge ratio says the CALIBRATION's stated σ
-    were too small; it says nothing about the user's Δch, so scaling the total
-    would inflate the user's own measurement too.  In variances:
-
-        σ² = σ_total² + (B² − 1)·σ_cal²
-
-    which is σ_total when B = 1 and B·σ_cal when the query adds nothing.
-    """
-    if not (np.isfinite(total) and np.isfinite(cal)):
-        return total
-    return float(np.sqrt(total * total + (B * B - 1.0) * cal * cal))
-
-
-def _curve_peak_in_range(func, E_lo, E_hi, n=4000):
-    """(value, energy) of the maximum of func over [E_lo, E_hi] -- the data.
-
-    Never outside it: a relative efficiency normalised to an extrapolated
-    value inherits the extrapolation's arbitrariness.  Returns (1.0, nan) if
-    the curve has no finite positive value there, so a caller dividing by the
-    result cannot divide by zero.
-    """
-    E = np.linspace(float(E_lo), float(E_hi), int(n))
-    with np.errstate(over="ignore", invalid="ignore", divide="ignore"):
-        v = np.asarray(func(E), dtype=float)
-    ok = np.isfinite(v) & (v > 0)
-    if not ok.any():
-        return 1.0, float("nan")
-    k = int(np.argmax(np.where(ok, v, -np.inf)))
-    return float(v[k]), float(E[k])
-
-
-def _birge(chi2, ndf):
-    """Birge ratio B = √(χ²/ndf).
-
-    Returns 1.0 when ndf ≤ 0 — an exactly-determined fit carries no scatter
-    information, so the stated σ are used unscaled instead of dividing by zero.
-    """
-    return float(np.sqrt(chi2 / ndf)) if ndf > 0 else 1.0
-
-
-def _invert_quadratic(a, b, c, ch, ref):
-    """Solve  a + b·E + c·E² = ch  for E, returning the root nearest `ref`.
-
-    Uses the cancellation-free (Citardauq) form
-
-        q = −½·(b + sign(b)·√disc),      E₁ = q/c,      E₂ = (a−ch)/q
-
-    rather than the schoolbook (−b ± √disc)/2c.  The schoolbook form divides
-    *both* roots by 2c, so MC samples where c drifts near zero — the normal
-    case for a nearly linear detector — blow up to ±inf and poison the mean.
-    Here only E₁, the spurious far root, degenerates as c → 0; E₂ stays finite
-    and tends to the linear solution (ch−a)/b, so selecting the root nearest
-    the linear reference `ref` reliably picks the physical one.
-
-    sign(0) is taken as +1 so q can never collapse to zero.  Samples with a
-    negative discriminant, or where neither root is finite, return NaN.
-    """
-    a, b, c, ch, ref = (np.asarray(v, dtype=float)
-                        for v in (a, b, c, ch, ref))
-    C = a - ch
-    with np.errstate(divide="ignore", invalid="ignore"):
-        disc = b * b - 4.0 * c * C
-        sq   = np.sqrt(np.where(disc >= 0, disc, np.nan))
-        q    = -0.5 * (b + np.where(b >= 0, 1.0, -1.0) * sq)
-        e1   = q / c        # degenerates as c → 0
-        e2   = C / q        # well behaved as c → 0
-        d1, d2 = np.abs(e1 - ref), np.abs(e2 - ref)
-        # Prefer a finite root; between two finite roots take the nearer one.
-        pick1 = np.isfinite(e1) & (~np.isfinite(e2) | (d1 <= d2))
-        out   = np.where(pick1, e1, e2)
-    return np.where(np.isfinite(out), out, np.nan)
-
-
-# ── Fit functions ──────────────────────────────────────────────────────────────
-def f_lin(E, a, b):     return a + b * E
-def f_quad(E, a, b, c): return a + b * E + c * E**2
-
-def f_krf(E, a, b, c, d):
-    """KRF 4-parameter efficiency:  ε(E) = (aE + b/E)·exp(cE + d/E)"""
-    return (a * E + b / E) * np.exp(c * E + d / E)
-
-def f_radware(E, a1, a2, a3, a4, a5, a6, g):
-    """Radware 7-parameter efficiency (Radford EFFIT v4.0, 1999).
-
-    ln ε(E) = f · (1 + r^g)^(-1/g)
-    where:
-        f1 = a1 + a2·x + a3·x²     x = ln(E/100)   (low-E region)
-        f2 = a4 + a5·y + a6·y²     y = ln(E/1000)  (high-E region)
-        f  = min(f1, f2)
-        F  = max(f1, f2)
-        r  = f / F                 (≥ 1 when both regions give ε < 1)
-
-    With r = f/F >= 1 (both f1, f2 negative for eff < 1) and g large,
-    (1 + r**g)**(-1/g) -> 1/r, so log_eff -> F: the result is dominated by
-    max(f1, f2), the LESS negative branch, i.e. the higher efficiency. An
-    earlier version of this docstring claimed the opposite.
-
-    Implementation faithful to Radford's `eval()` in effit.c — note that f1,
-    f2 are *log-efficiencies* (typically negative), NOT positive numbers.
-    The earlier `np.maximum(…, 1e-30)` clipping forced them positive and made
-    the loss landscape pathological — hence MC stalls.
-    """
-    E  = np.asarray(E, dtype=float)
-    x  = np.log(E * 0.01)            # ln(E/100)
-    y  = np.log(E * 0.001)           # ln(E/1000)
-    f1 = a1 + (a2 + a3*x) * x        # Horner form: 1 fewer multiplication
-    f2 = a4 + (a5 + a6*y) * y
-
-    f = np.minimum(f1, f2)
-    F = np.maximum(f1, f2)
-    # F=0 is astronomically unlikely; tiny additive shift handles it
-    # without an extra np.where allocation.
-    r = np.maximum(f / (F + (F == 0) * 1e-300), 1e-300)
-
-    # Stable (1 + r^g)^(-1/g) via log-sum-exp:
-    g_log_r = np.clip(g * np.log(r), -700.0, 700.0)
-    log_y3  = -np.logaddexp(0.0, g_log_r) / g
-
-    log_eff = np.clip(f * np.exp(log_y3), -700.0, 700.0)
-    return np.exp(log_eff)
-
-# ── Efficiency fitting helpers ─────────────────────────────────────────────────
-
-def _krf_p0(E, eff):
-    """Data-driven initial parameters for KRF: ε=(aE+b/E)exp(cE+d/E).
-
-    Derive a,b from geometric-mean efficiency and energy so the model
-    reproduces the typical scale; seed c,d small so the exponential is ~1.
-    """
-    Eg  = float(np.exp(np.mean(np.log(np.maximum(E,   1e-30)))))
-    eg  = float(np.exp(np.mean(np.log(np.maximum(eff, 1e-30)))))
-    a0  = eg / (2.0 * Eg)
-    b0  = eg * Eg / 2.0
-    return [a0, b0, -1e-4, 1.0]
-
-
-def _radware_p0(E, eff):
-    """Initial parameters using Radford's `parset()` logic from effit.c.
-
-    Finds the data points whose energies are nearest to the low-E reference
-    (100 keV) and high-E reference (1000 keV) and seeds:
-        a1 = ln(ε[ix1]) + a2·(ln 100  − ln E[ix1])     a2 =  1.5
-        a4 = ln(ε[ix2]) + a5·(ln 1000 − ln E[ix2])     a5 = -0.9
-        a3 = a6 = 0,   g = 15
-    This places the polynomials so a1 ≈ ln ε(100) and a4 ≈ ln ε(1000) — the
-    natural physical interpretation, with both being NEGATIVE for ε < 1.
-    """
-    E   = np.asarray(E,   dtype=float)
-    eff = np.asarray(eff, dtype=float)
-
-    ix1 = int(np.argmin(np.abs(E -  100.0)))
-    ix2 = int(np.argmin(np.abs(E - 1000.0)))
-
-    ln_e1 = float(np.log(max(eff[ix1], 1e-30)))
-    ln_e2 = float(np.log(max(eff[ix2], 1e-30)))
-
-    a2, a5 = 1.5, -0.9
-    a1 = ln_e1 + a2 * (np.log( 100.0) - np.log(E[ix1]))
-    a4 = ln_e2 + a5 * (np.log(1000.0) - np.log(E[ix2]))
-    return [a1, a2, 0.0, a4, a5, 0.0, 15.0]
-
-
-def _radware_p0_polyfit(E, eff):
-    """Alternative seed: independent 2-degree polyfits of ln ε vs x and y.
-
-    Kept as a secondary multi-start candidate; less reliable than the
-    parset-style seed but useful when ε is far from a clean power-law shape.
-    """
-    lne = np.log(np.maximum(eff, 1e-30))
-    x   = np.log(E /  100.0)
-    y   = np.log(E / 1000.0)
-    cx  = np.polyfit(x, lne, 2)   # [x², x, const]
-    cy  = np.polyfit(y, lne, 2)
-    return [float(cx[2]), float(cx[1]), float(cx[0]),
-            float(cy[2]), float(cy[1]), float(cy[0]), 15.0]
-
-
-def f_radware_5p(E, a1, a2, a4, a5, a6):
-    """5-parameter Radware efficiency — C (a3) = 0 and G = 15 fixed.
-
-    This is Radford's default fitting configuration in effit.c (getdat()):
-        efgd.freepars[2] = 0;   // C = 0 fixed
-        efgd.freepars[6] = 0;   // G = 15 fixed
-        efgd.nfp = 2;           // two parameters fixed → 5 free
-    Fixing C and G makes the Levenberg-Marquardt fitter (Bevington CURFIT)
-    substantially more stable while preserving full physical accuracy for
-    typical HPGe detectors.
-    """
-    return f_radware(E, a1, a2, 0.0, a4, a5, a6, 15.0)
-
-
-def _radware_p0_5p(E, eff):
-    """Radford parset() seed for the 5-parameter model.
-
-    Calls _radware_p0() and strips the two fixed entries (a3=0, g=15),
-    returning [a1, a2, a4, a5, a6] ready for f_radware_5p.
-    """
-    full = _radware_p0(E, eff)   # [a1, a2, 0, a4, a5, 0, 15]
-    return [full[0], full[1], full[3], full[4], full[5]]
-
-
-def _radware_extra_starts(E, eff, n, seed=SEED):
-    """`n` deterministic random starting points for the Radware 5-p best fit.
-
-    Drawn uniformly in a box around the physically sensible region (a1, a4
-    within ±6 of the data's ln ε range, a2 in [−15, 25], a5 and a6 in
-    [−8, 8]) from a FIXED seed, so a calibration is reproducible.  The χ²
-    surface is multimodal: on the v4.8 example data 2 500 such starts reach
-    the global minimum 27 % of the time, a second one (χ² +18) 6 %, and the
-    minimum parset() leads to (χ² +102) 29 %.
-    """
-    lne = np.log(np.maximum(np.asarray(eff, dtype=float), 1e-30))
-    lo_e, hi_e = float(lne.min()) - 6.0, float(lne.max()) + 6.0
-    rng = np.random.default_rng(seed + 1)
-    lo = np.array([lo_e, -15.0, lo_e, -8.0, -8.0])
-    hi = np.array([hi_e,  25.0, hi_e,  8.0,  8.0])
-    return list(lo + (hi - lo) * rng.random((int(n), 5)))
-
-
-def _distinct_curve(f, E, p_a, p_b, rtol=1e-3):
-    """True if two parameter sets give curves differing by > rtol on E."""
-    with np.errstate(over="ignore", invalid="ignore", divide="ignore"):
-        a, b = f(E, *p_a), f(E, *p_b)
-    ok = np.isfinite(a) & np.isfinite(b) & (a > 0)
-    return bool(ok.any() and np.max(np.abs(b[ok] / a[ok] - 1.0)) > rtol)
-
-
-def _multistart(func, E, eff, deff, p0_list, bounds, maxfev=20000):
-    """Try multiple starting points; return the fit with lowest weighted χ².
-
-    Tolerances kept at scipy defaults — multi-start (not tighter ftol) is
-    what reduces inter-model divergence.  Any candidate that fails to
-    converge is silently skipped.  Returns *None* only if every candidate
-    fails.
-    """
-    best_p, best_chi2 = None, np.inf
-    for p0 in p0_list:
-        try:
-            p, _ = curve_fit(
-                func, E, eff, p0=p0,
-                sigma=deff, absolute_sigma=True,
-                bounds=bounds, maxfev=maxfev,
-                method="trf",
-            )
-            chi2 = float(np.sum(((eff - func(E, *p)) / deff) ** 2))
-            if chi2 < best_chi2:
-                best_chi2, best_p = chi2, p
-        except Exception:
-            pass
-    return best_p
-
-
-# ── Linear / quadratic calibration helpers ─────────────────────────────────────
-
-def _wls(E, ch, dch, deg):
-    cols = [E**k for k in range(deg + 1)]
-    A    = np.column_stack(cols)
-    W    = 1.0 / dch
-    p, *_ = np.linalg.lstsq(A * W[:, None], ch * W, rcond=None)
-    return p
-
-def _batch_wls(A_weighted, yw_all):
-    ATA  = A_weighted.T @ A_weighted
-    ATyw = yw_all @ A_weighted
-    L    = np.linalg.cholesky(ATA)
-    return np.linalg.solve(L.T, np.linalg.solve(L, ATyw.T)).T
 
 
 # ── Hover tooltip ──────────────────────────────────────────────────────────────
@@ -814,571 +408,6 @@ class _Tooltip:
             tw.after(100, self._poll)
         except Exception:
             self._tip = None
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-class CalibrationEngine:
-
-    def __init__(self):
-        self.reset()
-
-    def reset(self):
-        self.data_loaded  = False
-        self.cal_ready    = False
-        self.error_msg    = None
-        self.filepath     = None
-        self.n            = 0
-        self.ch = self.dch = self.E = None
-        self.N = self.dN = self.I_pct = self.dI_pct = None
-        self.popt1 = self.popt2 = None
-        self.pcov1 = self.pcov2 = None
-        self.params_lin = self.params_quad = None
-        self.birge1 = self.birge2 = None
-        self.rms1   = self.rms2   = None
-        self.chi2_1 = self.chi2_2 = None
-        self.ndf1   = self.ndf2   = None
-        self.eff = self.deff = None
-        self.eff_popt   = None
-        self.params_eff = None
-        self.eff_rms    = self.eff_birge = None
-        self.eff_chi2   = self.eff_ndf   = None
-        self.radware_popt   = None
-        self.params_radware = None
-        self.radware_rms    = self.radware_birge = None
-        self.radware_chi2   = self.radware_ndf   = None
-        # Normalisation, shared by % mode and the SpectraTools export: the peak
-        # of the best-fit KRF curve WITHIN the fitted energy range (eff_peak,
-        # reached at eff_peak_E).  eff_norm = 100 / eff_peak converts a.u. to %.
-        self.eff_norm   = None
-        self.eff_peak   = self.eff_peak_E = None
-        self.eff_ready  = False
-        self.mc_krf_ok  = self.mc_rw_ok = self.mc_bad = 0
-        # Radware MC refits that needed the parset() fallback because the
-        # warm start from the best fit was rejected.
-        self.mc_rw_fallback = 0
-        # A second Radware minimum within Δχ²/B² < 1 of the best fit, if the
-        # multistart found one: dict(chi2, popt, dchi2_B2, max_dev, at_E).
-        self.radware_alt = None
-        # Self-check: χ² of the MC refit procedure applied to the UNPERTURBED
-        # data, minus the best-fit χ².  > 1 means the MC samples a different
-        # minimum from the curve that is plotted.
-        self.krf_selfcheck_dchi2 = self.rw_selfcheck_dchi2 = None
-        # Cached bands (dicts from _mc_interval, a.u.) on eff_grid, and the
-        # bias check max |z| over the calibration energies, per model.
-        self.eff_grid = None
-        self.band_krf = self.band_rw = None
-        self.krf_bias_z = self.rw_bias_z = None
-
-    def load(self, filepath):
-        """Read and validate a 7-column calibration file.
-
-        Every check below guards a specific downstream failure.  Without them
-        a malformed file loads cleanly and then dies deep inside numpy or
-        scipy with a message that points at the fit rather than at the data.
-        """
-        data = np.loadtxt(filepath, ndmin=2)   # ndmin=2 keeps 1-row files 2-D
-        if data.shape[1] < 7:
-            raise ValueError(
-                f"File has {data.shape[1]} column(s); 7 are required:\n"
-                "    ch   Δch   N   ΔN   E[keV]   I[%]   ΔI[%]")
-
-        ch, dch       = data[:, 0], data[:, 1]
-        N,  dN        = data[:, 2], data[:, 3]
-        E             = data[:, 4]
-        I_pct, dI_pct = data[:, 5], data[:, 6]
-        n = len(ch)
-
-        if n < MIN_POINTS:
-            raise ValueError(
-                f"Only {n} calibration point(s) — at least {MIN_POINTS} are "
-                "needed.\nThe quadratic fit has 3 free parameters, so ndf = "
-                "n − 3 must exceed 0.")
-        if not np.isfinite(data[:, :7]).all():
-            bad = ~np.isfinite(data[:, :7]).all(axis=1)
-            raise ValueError(
-                f"Non-numeric or infinite value on row(s): {_rows(bad)}")
-        if np.any(dch <= 0):
-            raise ValueError(
-                "Δch must be > 0 on every row — it is the fit weight 1/Δch.\n"
-                f"Row(s) {_rows(dch <= 0)} have Δch ≤ 0.")
-        if np.any(E <= 0):
-            raise ValueError(
-                "E must be > 0 keV — the efficiency models evaluate ln(E) and "
-                f"b/E.\nRow(s) {_rows(E <= 0)} have E ≤ 0.")
-        if np.any(N <= 0):
-            raise ValueError(
-                "N (peak area) must be > 0 — ε = N/I must be positive to fit.\n"
-                f"Row(s) {_rows(N <= 0)} have N ≤ 0.")
-        if np.any(I_pct <= 0):
-            raise ValueError(
-                "I (emission intensity) must be > 0 — ε = N/I.\n"
-                f"Row(s) {_rows(I_pct <= 0)} have I ≤ 0.")
-        if np.any(dN < 0) or np.any(dI_pct < 0):
-            raise ValueError(
-                "ΔN and ΔI are absolute uncertainties and must be ≥ 0.\n"
-                f"Row(s) {_rows((dN < 0) | (dI_pct < 0))} are negative.")
-        if np.any((dN == 0) & (dI_pct == 0)):
-            raise ValueError(
-                "ΔN and ΔI are both 0 on row(s) "
-                f"{_rows((dN == 0) & (dI_pct == 0))} — Δε would be 0 and the "
-                "efficiency χ² would divide by zero.")
-
-        self.ch, self.dch = ch, dch
-        self.N,  self.dN  = N,  dN
-        self.E            = E
-        self.I_pct, self.dI_pct = I_pct, dI_pct
-        self.n = n
-        self.filepath = filepath
-        self.data_loaded = True
-        self.cal_ready   = False
-        self.eff_ready   = False
-
-    def calibrate(self, progress_cb=None):
-        if not self.data_loaded: raise RuntimeError("Load data first.")
-        try:
-            self._fit_best(progress_cb)
-            self._mc(progress_cb)
-            self.cal_ready = True
-        except Exception as exc:
-            self.error_msg = str(exc); raise
-
-    def _fit_best(self, cb):
-        if cb: cb(5, "Computing best-fit parameters …")
-        p1_0 = _wls(self.E, self.ch, self.dch, 1)
-        p2_0 = _wls(self.E, self.ch, self.dch, 2)
-        self.popt1, self.pcov1 = curve_fit(f_lin,  self.E, self.ch, p0=p1_0,
-                                            sigma=self.dch, absolute_sigma=True)
-        self.popt2, self.pcov2 = curve_fit(f_quad, self.E, self.ch, p0=p2_0,
-                                            sigma=self.dch, absolute_sigma=True)
-        n = len(self.ch)
-        r1 = self.ch - f_lin(self.E,  *self.popt1)
-        r2 = self.ch - f_quad(self.E, *self.popt2)
-        self.chi2_1 = float(np.sum((r1/self.dch)**2)); self.ndf1 = n - 2
-        self.chi2_2 = float(np.sum((r2/self.dch)**2)); self.ndf2 = n - 3
-        self.birge1 = _birge(self.chi2_1, self.ndf1)
-        self.birge2 = _birge(self.chi2_2, self.ndf2)
-        self.rms1   = float(np.sqrt(np.mean(r1**2)))
-        self.rms2   = float(np.sqrt(np.mean(r2**2)))
-
-    def _mc(self, cb):
-        if cb: cb(12, f"MC calibration ({N_MC_CAL:,} samples) …")
-        n   = len(self.ch); W = 1.0 / self.dch
-        A1  = np.column_stack([np.ones(n), self.E])            * W[:, None]
-        A2  = np.column_stack([np.ones(n), self.E, self.E**2]) * W[:, None]
-        rng = np.random.default_rng(SEED)
-        yw  = rng.normal(self.ch, self.dch, (N_MC_CAL, n)) * W[None, :]
-        if cb: cb(20, "MC: linear fits …")
-        self.params_lin  = _batch_wls(A1, yw)
-        if cb: cb(58, "MC: quadratic fits …")
-        self.params_quad = _batch_wls(A2, yw)
-        if cb: cb(97, "Finalising …")
-
-    def calibrate_efficiency(self, progress_cb=None):
-        if not self.data_loaded: raise RuntimeError("Load data first.")
-        if progress_cb: progress_cb(2, "Computing efficiency points …")
-        eff  = self.N / self.I_pct
-        deff = eff * np.sqrt((self.dN/self.N)**2 + (self.dI_pct/self.I_pct)**2)
-        self.eff = eff; self.deff = deff
-
-        bounds_krf = ([0, 0, -np.inf, -np.inf], [np.inf, np.inf, 0, np.inf])
-
-        # ── KRF best-fit — multi-start ────────────────────────────────
-        if progress_cb: progress_cb(5, "Best-fit KRF curve …")
-        p0_data = _krf_p0(self.E, eff)
-        krf_candidates = [
-            p0_data,
-            [p0_data[0]*2,  p0_data[1]*2,  -1e-4, 1.0],
-            [p0_data[0]*0.5,p0_data[1]*0.5,-5e-4, 0.5],
-            [p0_data[0],    p0_data[1],    -1e-3, 2.0],
-            [1.0, 1e3, -1e-3, 0.0],          # original fixed seed as fallback
-        ]
-        popt_krf = _multistart(f_krf, self.E, eff, deff,
-                               krf_candidates, bounds_krf)
-        if popt_krf is None:
-            raise RuntimeError("KRF fit failed to converge from all starting points.")
-        self.eff_popt = popt_krf
-        res_k = eff - f_krf(self.E, *popt_krf)
-        self.eff_rms   = float(np.sqrt(np.mean(res_k**2)))
-        self.eff_ndf   = len(self.E) - 4
-        self.eff_chi2  = float(np.sum((res_k/deff)**2))
-        self.eff_birge = _birge(self.eff_chi2, self.eff_ndf)
-
-        # Normalisation: the KRF peak WITHIN the fitted range.  It used to be
-        # the maximum over 0.9*Emin .. 1.1*Emax, and on a curve still rising at
-        # the lowest calibration line -- the usual case above ~150 keV -- that
-        # maximum sat on the grid's lower edge: an extrapolated value fixed by
-        # an arbitrary 0.9.  The SpectraTools export took a different
-        # extrapolated maximum again, so one curve read 2.1% differently in the
-        # app and in SpectraTools.  Both now use this single number.
-        self.eff_peak, self.eff_peak_E = _curve_peak_in_range(
-            lambda x: f_krf(x, *popt_krf),
-            float(self.E.min()), float(self.E.max()))
-        self.eff_norm = 100.0 / self.eff_peak
-
-        # ── Radware best-fit — 5-parameter (Radford's procedure) ────────
-        # Radford's effit.c fixes C (a3) = 0 and G = 15, leaving 5 free
-        # parameters: A (a1), B (a2), D (a4), E (a5), F (a6).
-        # Seeds: Radford's parset(), the polyfit alternative, and
-        # N_RW_EXTRA_STARTS deterministic random starts; all LM (Bevington
-        # CURFIT), no bounds; the lowest χ² wins.  The χ² surface has several
-        # local minima and parset() alone does not reliably find the global
-        # one -- on the v4.8 example data it lands 102 χ² units above it, and
-        # the global minimum was found only because polyfit happened to start
-        # in the right basin.
-        if progress_cb: progress_cb(8, "Best-fit Radware curve (5-param, C=0, G=15) …")
-        p0_5        = _radware_p0_5p(self.E, eff)           # parset seed
-        p0_poly_all = _radware_p0_polyfit(self.E, eff)
-        p0_5_poly   = [p0_poly_all[i] for i in [0, 1, 3, 4, 5]]   # drop a3, g
-        rw_seeds = [p0_5, p0_5_poly] + _radware_extra_starts(
-            self.E, eff, N_RW_EXTRA_STARTS)
-
-        rw_minima = []                      # (chi2, pp) of every accepted fit
-        for seed in rw_seeds:
-            try:
-                with np.errstate(over="ignore", invalid="ignore",
-                                 divide="ignore"):
-                    pp, _ = curve_fit(
-                        f_radware_5p, self.E, eff, p0=seed,
-                        sigma=deff, absolute_sigma=True,
-                        method="lm", maxfev=20000,
-                    )
-                    if not (np.all(np.isfinite(pp)) and np.all(np.abs(pp) < 500)):
-                        continue
-                    chi2 = float(np.sum(((eff - f_radware_5p(self.E, *pp))
-                                         / deff)**2))
-                if np.isfinite(chi2):
-                    rw_minima.append((chi2, pp))
-            except Exception:
-                pass
-        rw_minima.sort(key=lambda t: t[0])
-        popt_rw = rw_minima[0][1] if rw_minima else None
-
-        self.radware_alt = None
-        if popt_rw is not None:
-            self.radware_popt = popt_rw          # [a1, a2, a4, a5, a6]
-            res_r = eff - f_radware_5p(self.E, *popt_rw)
-            self.radware_rms   = float(np.sqrt(np.mean(res_r**2)))
-            self.radware_ndf   = len(self.E) - 5    # 5 free parameters
-            self.radware_chi2  = float(np.sum((res_r/deff)**2))
-            self.radware_birge = _birge(self.radware_chi2, self.radware_ndf)
-            # A different curve almost as good: Δχ²/B² < 1 means the two are
-            # statistically indistinguishable once the Birge scaling is
-            # applied.  The MC (warm-started from the best fit) describes the
-            # uncertainty WITHIN the best fit's minimum, so this ambiguity is
-            # not in the band; it is reported as a model systematic instead.
-            B2 = _band_scale(self.radware_birge) ** 2
-            E_in = np.linspace(float(self.E.min()), float(self.E.max()), 400)
-            for chi2_a, pp_a in rw_minima[1:]:
-                d = (chi2_a - self.radware_chi2) / B2
-                if d >= 1.0:
-                    break
-                if not _distinct_curve(f_radware_5p, E_in, popt_rw, pp_a):
-                    continue                 # the same minimum, found again
-                with np.errstate(over="ignore", invalid="ignore"):
-                    dev = (f_radware_5p(E_in, *pp_a)
-                           / f_radware_5p(E_in, *popt_rw) - 1.0)
-                k = int(np.nanargmax(np.abs(dev)))
-                self.radware_alt = dict(chi2=float(chi2_a), popt=pp_a,
-                                        dchi2_B2=float(d),
-                                        max_dev=float(dev[k]),
-                                        at_E=float(E_in[k]))
-                break
-        else:
-            self.radware_popt = None
-            popt_rw = None        # disable Radware in MC loop
-
-        # ── MC loop — resample N and I, refit both ────────────────────
-        # A parametric bootstrap: every iteration redraws N and I from their
-        # stated uncertainties and refits both models.
-        #   • Skip pathological samples (N_s≤0, I_s≤0, non-finite ratios).
-        #   • Levenberg-Marquardt (method="lm") — 2-3× faster than TRF:
-        #     cheaper per-iteration linear algebra, no bound projection.
-        #   • BOTH models are warm-started from their own best fit.  The start
-        #     is FIXED (every refit starts from the same popt, never from the
-        #     previous sample's result), so there is no chain and no chain
-        #     bias: the samples stay independent.  What the warm start buys is
-        #     that every refit lands in the SAME local minimum as the plotted
-        #     curve, so the MC describes the uncertainty of that curve.
-        #     Radware used to start each refit from a fresh parset() seed;
-        #     on data whose lowest line lies well above 100 keV that seed sits
-        #     in a different basin, and on the v4.8 example data 9 999 of
-        #     10 000 refits converged 102 χ² units above the best fit -- the
-        #     ensemble was 7.4 MC-σ off the plotted curve at 843 keV.
-        #   • Radware falls back to parset(eff_s) only when the warm-started
-        #     fit is rejected.  That happens when the best fit lies on a flat
-        #     (a1, a2) valley -- the low-energy branch active only below the
-        #     data -- and LM slides along it past |p| < 500 at an unchanged
-        #     χ²; on the pre-v4.8 data that was half the refits.
-        #   • Relaxed tolerances (1e-5) and maxfev=1500: measured to change
-        #     the result by ≤ 0.01 σ; no refit ever needed more than ~300
-        #     evaluations.
-        #   • Progress callback every 100 iter → UI updates ~1× per second.
-        MC_MAXFEV = 1500
-        MC_TOL    = 1e-5       # ftol = xtol = gtol for MC fits
-
-        def _lm(func, y, p0):
-            pp, _ = curve_fit(func, self.E, y, p0=p0,
-                              sigma=deff, absolute_sigma=True,
-                              maxfev=MC_MAXFEV, method="lm",
-                              ftol=MC_TOL, xtol=MC_TOL, gtol=MC_TOL)
-            return pp
-
-        def refit_krf(y):
-            try:
-                pp = _lm(f_krf, y, popt_krf)
-            except Exception:
-                return None
-            return pp if np.all(np.isfinite(pp)) else None
-
-        def refit_rw(y):
-            """(params, used_fallback), or (None, False) if both fail."""
-            for fallback, p0 in ((False, popt_rw), (True, None)):
-                if p0 is None:
-                    p0 = _radware_p0_5p(self.E, y)
-                try:
-                    pp = _lm(f_radware_5p, y, p0)
-                except Exception:
-                    continue
-                if np.all(np.isfinite(pp)) and np.all(np.abs(pp) < 500):
-                    return pp, fallback
-            return None, False
-
-        def chi2_of(func, pp):
-            return float(np.sum(((eff - func(self.E, *pp)) / deff) ** 2))
-
-        # Self-check: the MC refit procedure applied to the UNPERTURBED data
-        # must reproduce the best fit.  If it does not, the MC samples a
-        # different minimum from the plotted curve -- the v4.8 Radware defect.
-        pk = refit_krf(eff)
-        self.krf_selfcheck_dchi2 = (chi2_of(f_krf, pk) - self.eff_chi2
-                                    if pk is not None else float("inf"))
-        self.rw_selfcheck_dchi2 = None
-        if popt_rw is not None:
-            pr, _ = refit_rw(eff)
-            self.rw_selfcheck_dchi2 = (chi2_of(f_radware_5p, pr)
-                                       - self.radware_chi2
-                                       if pr is not None else float("inf"))
-
-        rng = np.random.default_rng(SEED)
-        store_krf = []; store_rw = []
-        n_bad     = 0          # count rejected pathological samples
-        n_fb      = 0          # Radware refits that needed the fallback
-
-        for k in range(N_MC_EFF):
-            if progress_cb and k % 100 == 0:
-                progress_cb(10 + int(85*k/N_MC_EFF),
-                            f"Efficiency MC ({k:,}/{N_MC_EFF:,}) …")
-
-            N_s = rng.normal(self.N,     self.dN)
-            I_s = rng.normal(self.I_pct, self.dI_pct)
-
-            # Reject non-physical samples
-            if (N_s <= 0).any() or (I_s <= 0).any():
-                n_bad += 1
-                continue
-            eff_s = N_s / I_s
-            if not np.isfinite(eff_s).all() or (eff_s <= 0).any():
-                n_bad += 1
-                continue
-
-            pp = refit_krf(eff_s)
-            if pp is not None:
-                store_krf.append(pp)
-
-            # Radware — 5-parameter (C=0, G=15 fixed).
-            if popt_rw is not None:
-                pp_r, fb = refit_rw(eff_s)
-                if pp_r is not None:
-                    store_rw.append(pp_r)
-                    n_fb += fb
-
-        if n_bad:
-            # Surface to status bar via the progress callback (does not
-            # interrupt UI; just informational)
-            if progress_cb:
-                progress_cb(99,
-                    f"MC complete — {n_bad:,} non-physical samples skipped")
-
-        # Keep params_eff 2-D even when every MC fit failed.  np.array([]) is
-        # 1-D, so params_eff[:, 0] would raise "too many indices" and surface
-        # as a cryptic status-bar error rather than an honest "MC failed".
-        self.params_eff     = (np.asarray(store_krf, dtype=float)
-                               if store_krf else np.empty((0, 4)))
-        self.params_radware = (np.asarray(store_rw, dtype=float)
-                               if store_rw else None)
-        self.mc_krf_ok = len(self.params_eff)
-        self.mc_rw_ok  = (0 if self.params_radware is None
-                          else len(self.params_radware))
-        self.mc_bad    = n_bad
-        self.mc_rw_fallback = n_fb
-
-        # Bands, cached once from EVERY accepted sample, and the bias check.
-        if progress_cb: progress_cb(96, "Efficiency bands …")
-        self._build_eff_bands()
-
-        self.eff_ready  = True
-        if progress_cb: progress_cb(100, "Efficiency calibration done.")
-
-    def _model_samples(self, which, E):
-        """(MC samples, best fit, Birge) of one model at energies E (a.u.).
-
-        samples has shape (n_samples, len(E)) for array E, (n_samples,) for a
-        scalar; None when the model has no MC samples or no best fit.
-        """
-        scalar = np.ndim(E) == 0
-        Ec = np.atleast_1d(np.asarray(E, dtype=float))[None, :]
-        with np.errstate(over="ignore", invalid="ignore", divide="ignore"):
-            if which == "krf":
-                p = self.params_eff
-                if p is None or not len(p) or self.eff_popt is None:
-                    return None
-                s  = f_krf(Ec, p[:, 0:1], p[:, 1:2], p[:, 2:3], p[:, 3:4])
-                bf = f_krf(Ec[0], *self.eff_popt)
-                B  = self.eff_birge
-            else:
-                p = self.params_radware
-                if p is None or not len(p) or self.radware_popt is None:
-                    return None
-                s  = f_radware_5p(Ec, p[:, 0:1], p[:, 1:2], p[:, 2:3],
-                                  p[:, 3:4], p[:, 4:5])
-                bf = f_radware_5p(Ec[0], *self.radware_popt)
-                B  = self.radware_birge
-        if scalar:
-            return s[:, 0], float(bf[0]), B
-        return s, bf, B
-
-    def _build_eff_bands(self):
-        """Cache both models' bands on eff_grid and their bias check z.
-
-        z is taken at the calibration energies, not on the grid: the grid runs
-        4 % below and 2 % above the data, where an extrapolated curve can have
-        a legitimately skewed MC distribution that says nothing about whether
-        the refits found the right minimum.
-        """
-        E = self.E
-        self.eff_grid = np.linspace(E.min() * 0.96, E.max() * 1.02, EFF_GRID_N)
-        self.band_krf = self.band_rw = None
-        self.krf_bias_z = self.rw_bias_z = None
-        for which in ("krf", "rw"):
-            got = self._model_samples(which, self.eff_grid)
-            if got is None:
-                continue
-            band = _mc_interval(*got)
-            at_E = _mc_interval(*self._model_samples(which, E))
-            zmax = float(np.nanmax(np.abs(at_E["z"]))) \
-                if np.isfinite(at_E["z"]).any() else float("nan")
-            if which == "krf":
-                self.band_krf, self.krf_bias_z = band, zmax
-            else:
-                self.band_rw, self.rw_bias_z = band, zmax
-
-    def mc_health_warnings(self):
-        """Human-readable warnings about the efficiency MC, possibly empty."""
-        out = []
-        for name, z, dchi2 in (
-                ("KRF", self.krf_bias_z, self.krf_selfcheck_dchi2),
-                ("Radware", self.rw_bias_z, self.rw_selfcheck_dchi2)):
-            if z is not None and np.isfinite(z) and z > BIAS_Z_WARN:
-                out.append(f"{name} MC not centred on the best fit "
-                           f"(bias check max|z| = {z:.2f} > {BIAS_Z_WARN:g}); "
-                           f"its uncertainty is unreliable")
-            if dchi2 is not None and dchi2 > 1.0:
-                out.append(f"{name} MC refit does not reproduce the best fit "
-                           f"on the unperturbed data (Δχ² = {dchi2:.3g})")
-        return out
-
-    def energy_outside_fit(self, E_val):
-        """True if E_val lies outside the energies the efficiency was fitted to.
-
-        Inside that range a query interpolates between calibration lines;
-        outside it the answer is model extrapolation, which KRF and Radware can
-        disagree about by orders of magnitude a few tens of keV beyond the
-        data.
-        """
-        return not (float(self.E.min()) <= float(E_val) <= float(self.E.max()))
-
-    def channel_outside_fit(self, ch_val):
-        """True if ch_val lies outside the channels the energy fit used."""
-        return not (float(self.ch.min()) <= float(ch_val) <= float(self.ch.max()))
-
-    def predict_efficiency(self, E_val):
-        """Both models' efficiency and 1σ at E₀, as _mc_interval dicts.
-
-        Returns {"krf": {...}, "rw": {...}} with value = the best fit, minus /
-        plus = the Birge-scaled 1σ half-widths from the MC 16/50/84 %
-        quantiles, sigma = their symmetric mean, and median / z = the bias
-        check -- exactly the rule the plotted band uses, so a query and the
-        band through the same energy agree by construction.  (They used to
-        be the MC mean ± B·std, which on the v4.8 Radware fit sat outside the
-        band and away from the best-fit curve.)
-
-        Both models can blow up when extrapolated outside the fitted range —
-        KRF's exp(d/E) overflows, Radware's log-polynomial diverges — so
-        non-finite MC samples are filtered out, and fewer than 10 survivors
-        give NaN rather than a meaningless σ.  A model with no MC samples gets
-        NaN everywhere; its best fit is still evaluated when there is one.
-        """
-        E = float(E_val)
-        out = {}
-        for which, popt, func in (("krf", self.eff_popt, f_krf),
-                                  ("rw", self.radware_popt, f_radware_5p)):
-            got = self._model_samples(which, E)
-            if got is not None:
-                out[which] = _mc_interval(*got)
-                continue
-            iv = _nan_interval()
-            if popt is not None:
-                with np.errstate(over="ignore", invalid="ignore",
-                                 divide="ignore"):
-                    bf = float(func(E, *popt))
-                iv["value"] = bf if np.isfinite(bf) else float("nan")
-            out[which] = iv
-        return out
-
-    def predict(self, ch_val, dch_val):
-        """Invert ch(E) at ch₀ ± Δch₀ by Monte Carlo.
-
-        Seeded from SEED so re-querying the same channel reproduces the same
-        numbers: every query is appended to the _Res.txt log, and two identical
-        queries disagreeing there would be indistinguishable from a real change.
-
-        The returned σ inflate the calibration's share of the spread by its
-        Birge ratio (see _inflate_calibration_part) and leave the query's own
-        Δch alone.  They used to be the unscaled spread, which on a dataset
-        with B1 = 3345 reported a few 1e-5 keV for a calibration whose
-        residuals were a few tenths of a keV.
-        """
-        rng  = np.random.default_rng(SEED)
-        ch_m = rng.normal(ch_val, dch_val, N_MC_PRED)
-        idx  = rng.integers(0, N_MC_CAL, N_MC_PRED)
-        pl   = self.params_lin[idx]; pq = self.params_quad[idx]
-
-        a1, b1 = pl[:, 0], pl[:, 1]
-        with np.errstate(divide="ignore", invalid="ignore"):
-            E_lin = (ch_m - a1) / b1
-        # The linear solution is the reference used to pick the physical root
-        # of the quadratic — see _invert_quadratic().
-        E_quad = _invert_quadratic(pq[:, 0], pq[:, 1], pq[:, 2], ch_m, E_lin)
-
-        # Best-fit inversion using popt (no MC noise)
-        a1b, b1b = self.popt1
-        El_bf = (ch_val - a1b) / b1b
-        El_bf = float(El_bf) if np.isfinite(El_bf) else float("nan")
-        Eq_bf = float(_invert_quadratic(*self.popt2, ch_val, El_bf))
-
-        # The same parameter samples at the exact channel: the spread of these
-        # is the calibration's share alone, with the query's Δch taken out.
-        with np.errstate(divide="ignore", invalid="ignore"):
-            E_lin_cal = (ch_val - a1) / b1
-        E_quad_cal = _invert_quadratic(pq[:, 0], pq[:, 1], pq[:, 2],
-                                       ch_val, E_lin_cal)
-        El, sl = _finite_mean_std(E_lin)
-        Eq, sq = _finite_mean_std(E_quad)
-        sl = _inflate_calibration_part(sl, _finite_mean_std(E_lin_cal)[1],
-                                       _band_scale(self.birge1))
-        sq = _inflate_calibration_part(sq, _finite_mean_std(E_quad_cal)[1],
-                                       _band_scale(self.birge2))
-        return El, sl, Eq, sq, El_bf, Eq_bf
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1895,12 +924,12 @@ class App(tk.Tk):
         Tooltips on both the label and the (wider) hint label.
         """
         rows = [
-            ("E  (MC mean)",   "E_mc", "keV",
-             "mean of 10k MC draws",        _TIP_E_MC),
-            ("ΔE  (MC σ)",     "dE",   "keV",
+            ("E  (best fit)",  "E_bf", "keV",
+             "inversion of ch(E) — report", _TIP_E_BF),
+            ("ΔE  (1σ)",       "dE",   "keV",
              "σ of 10k MC draws",           _TIP_DE),
-            ("E  (best-fit)",  "E_bf", "keV",
-             "direct inversion of ch(E)",   _TIP_E_BF),
+            ("MC mean",        "E_mc", "keV",
+             "check only",                  _TIP_E_MC),
         ]
         for i, (lbl, key, unit, hint, tip) in enumerate(rows):
             r = 2 * i
@@ -1908,7 +937,7 @@ class App(tk.Tk):
                              font=("Segoe UI", 9), anchor="w")
             lbl_w.grid(row=r, column=0, sticky="ew", padx=2, pady=(4, 0))
             var = tk.StringVar(value="—")
-            # E_mc (i=0) and E_bf (i=2) use the fit colour; ΔE (i=1) is yellow
+            # E_bf (i=0) and E_mc (i=2) use the fit colour; ΔE (i=1) is yellow
             tk.Label(parent, textvariable=var, bg=self.PANEL,
                      fg=color if i != 1 else self.YELLOW,
                      font=("Courier New", 11, "bold"),
@@ -2121,7 +1150,7 @@ class App(tk.Tk):
 
         # Radware curve + MC band  (5-parameter: C=0, G=15 fixed)
         if e.radware_popt is not None:
-            eg_r = f_radware_5p(E_g, *e.radware_popt) * sc
+            eg_r = e.rw_curve(E_g) * sc
             ax.plot(E_g, eg_r, color=self.RAD_C, lw=2, ls="--",
                     label="Radware")
             if e.band_rw is not None:
@@ -2147,7 +1176,7 @@ class App(tk.Tk):
                   transform=ax_r.transAxes, ha="left", fontsize=7, color=self.EFF_C)
         all_res = [res_k]
         if e.radware_popt is not None:
-            res_r = (e.eff - f_radware_5p(E, *e.radware_popt)) * sc
+            res_r = (e.eff - e.rw_curve(E)) * sc
             ax_r.errorbar(E, res_r, yerr=deff, fmt='s', ms=4,
                           color=self.RAD_C, ecolor=self.MUTED, capsize=2,
                           elinewidth=1, label="Radware")
@@ -2310,7 +1339,9 @@ class App(tk.Tk):
             + (f"  {health[0]}  |" if health else "")
             + f"  Calibration ready  |  MC ok: KRF {e.mc_krf_ok:,}"
             + f", Radware {e.mc_rw_ok:,}  of {N_MC_EFF:,}"
-            + (f", {e.mc_bad:,} non-physical" if e.mc_bad else "")
+            + (f", {e.mc_bad:,} abandoned" if e.mc_bad else "")
+            + (f"  |  {len(e.fit_notes())} note(s) in the results file"
+               if e.fit_notes() else "")
             + (f"  |  Results → {fname}" if fname else ""),
             self.YELLOW if warn else self.GREEN)
         self._draw_calibration(); self._draw_efficiency()
@@ -2355,6 +1386,10 @@ class App(tk.Tk):
                 f"  χ²/ndf = {e.chi2_2:.4e} / {e.ndf2}   "
                 f"Birge = {e.birge2:.4f}   RMS = {e.rms2:.6f} ch",
                 "",
+                ("Reference-energy uncertainties ΔE (column 8) included by "
+                 "effective variance: σ² = Δch² + (dch/dE·ΔE)²"
+                 if np.any(e.dE) else
+                 "Reference energies treated as exact (no ΔE column 8)"),
                 f"Birge ratio reference: {_BIRGE_URL}", ""]
 
         # ── Efficiency calibration parameters ─────────────────────────
@@ -2379,10 +1414,12 @@ class App(tk.Tk):
                 # later use of the energy values.
                 ra1, ra2, ra4, ra5, ra6 = e.radware_popt   # a3=0, g=15 fixed
                 out += ["Radware (5-param, Radford effit.c procedure):",
-                        "  ln ε = f·(1 + r^G)^(-1/G)  with G=15 fixed",
-                        "  f = min(f1,f2);  f1 = a1+a2·x  [C=0 fixed]",
-                        "                   f2 = a4+a5·y+a6·y²",
+                        "  ln(k·ε) = (f1^-G + f2^-G)^(-1/G)  with G=15 fixed",
+                        "  f1 = a1+a2·x  [C=0 fixed],  f2 = a4+a5·y+a6·y²",
                         "  x = ln(E/100),  y = ln(E/1000)",
+                        f"  k = {e.radware_scale:.6e}: ε is rescaled so its "
+                        f"geometric mean is e^{caleneff_engine.RW_LN_CENTRE:g}, "
+                        "which makes the fit independent of the units of ε",
                         f"  a1={ra1:.6e}  a2={ra2:.6e}  a3= 0.000000e+00 (fixed)",
                         f"  a4={ra4:.6e}  a5={ra5:.6e}  a6={ra6:.6e}",
                         f"  G = 1.500000e+01 (fixed)",
@@ -2416,7 +1453,15 @@ class App(tk.Tk):
                 out += [""]
             for w in e.mc_health_warnings():
                 out += [f"  ⚠ {w}"]
-            out += [f"Birge ratio reference: {_BIRGE_URL}", ""]
+            if e.mc_redrawn or e.mc_bad:
+                out += [f"  MC: {e.mc_redrawn:,} non-positive N or I values "
+                        f"redrawn individually, {e.mc_bad:,} replicates "
+                        f"abandoned"]
+            notes = e.fit_notes()
+            if notes:
+                out += ["", "NOTES"]
+                out += [f"  • {n_}" for n_ in notes]
+            out += ["", f"Birge ratio reference: {_BIRGE_URL}", ""]
 
         # ── Efficiency data (observed) ─────────────────────────────────
         if e.eff_ready:
@@ -2453,7 +1498,7 @@ class App(tk.Tk):
             sep_row = f"  {'─'*10}  {'─'*14}  {'─'*14}  {'─'*14}"
             out += [dash, "FIT DATA  —  efficiency ε(E)", dash, "", hdr, sep_row]
             eff_fit_k = f_krf(e.E, *e.eff_popt)
-            eff_fit_r = (f_radware_5p(e.E, *e.radware_popt) if has_rw
+            eff_fit_r = (e.rw_curve(e.E) if has_rw
                          else [float("nan")] * e.n)
             for i in range(e.n):
                 out.append(
@@ -2519,7 +1564,10 @@ class App(tk.Tk):
         self.btn_calc.config(state="normal")
         self.btn_clr.config(state="normal")
         self.btn_eff_clr.config(state="normal")
-        self._draw_query(ch_val, dch_val, El, dEl, Eq, dEq)
+        # Markers sit on the best fit, as the efficiency query's do.
+        self._draw_query(ch_val, dch_val,
+                         El_bf if np.isfinite(El_bf) else El, dEl,
+                         Eq_bf if np.isfinite(Eq_bf) else Eq, dEq)
 
         # Append query to result file
         now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -2531,10 +1579,10 @@ class App(tk.Tk):
             f"[{now}]  ENERGY QUERY\n"
             f"  ch₀ = {ch_val:.4f}   Δch₀ = {dch_val:.4f}\n"
             f"{rng_note}"
-            f"  Linear:    E(MC mean) = {El:.4f} ± {dEl:.4f} keV"
-            f"   E(best-fit) = {El_bf_str} keV\n"
-            f"  Quadratic: E(MC mean) = {Eq:.4f} ± {dEq:.4f} keV"
-            f"   E(best-fit) = {Eq_bf_str} keV\n"
+            f"  Linear:    E = {El_bf_str} ± {dEl:.4f} keV (best fit)"
+            f"   MC mean = {El:.4f} keV (check)\n"
+            f"  Quadratic: E = {Eq_bf_str} ± {dEq:.4f} keV (best fit)"
+            f"   MC mean = {Eq:.4f} keV (check)\n"
             f"  σ: calibration share × Birge (B1={e.birge1:.4g}, B2={e.birge2:.4g})."
             f"  Fit RMS residual ≈ {rms_lin:.4f} keV (lin), "
             f"{rms_quad:.4f} keV (quad)\n\n")
@@ -2543,14 +1591,14 @@ class App(tk.Tk):
             self._status(
                 f"⚠  ch={ch_val:.1f} is OUTSIDE the fitted range "
                 f"{e.ch.min():.0f}–{e.ch.max():.0f} — extrapolated:  "
-                f"E(lin)={El:.3f}±{dEl:.3f} keV   "
-                f"E(quad)={Eq:.3f}±{dEq:.3f} keV",
+                f"E(lin)={El_bf:.3f}±{dEl:.3f} keV   "
+                f"E(quad)={Eq_bf:.3f}±{dEq:.3f} keV",
                 self.YELLOW)
         else:
             self._status(
                 f"✔  ch={ch_val:.1f}±{dch_val}  →  "
-                f"E(lin)={El:.3f}±{dEl:.3f} keV   "
-                f"E(quad)={Eq:.3f}±{dEq:.3f} keV",
+                f"E(lin)={El_bf:.3f}±{dEl:.3f} keV   "
+                f"E(quad)={Eq_bf:.3f}±{dEq:.3f} keV",
                 self.GREEN)
 
     def _draw_query(self, ch_val, dch_val, El, dEl, Eq, dEq):
@@ -2602,7 +1650,8 @@ class App(tk.Tk):
         if self._last_eff_query_au is None:
             return None
         E_val, res = self._last_eff_query_au
-        scaled = {k: _scale_interval(iv, sc) for k, iv in res.items()}
+        scaled = {k: (_scale_interval(iv, sc) if isinstance(iv, dict)
+                      else iv * sc) for k, iv in res.items()}
 
         for iv, v_bf, v_err, v_med in (
                 (scaled["krf"], self._eff_val_bf, self._eff_derr,
@@ -2672,7 +1721,13 @@ class App(tk.Tk):
             f"[{now}]  EFFICIENCY QUERY\n"
             f"  E₀ = {E_val:.4f} keV\n"
             f"{rng_note}"
-            + _log("KRF", res["krf"]) + _log("Radware", res["rw"]) +
+            + _log("KRF", res["krf"]) + _log("Radware", res["rw"])
+            + (f"  Model difference KRF − Radware = "
+               f"{res['model_diff']:+.4e} a.u. "
+               f"({100 * res['model_diff'] / res['rw']['value']:+.2f} %); "
+               f"in neither 1σ\n"
+               if np.isfinite(res["model_diff"]) and res["rw"]["value"]
+               else "") +
             f"  1σ: MC 15.87–84.13 % quantiles about the MC median, "
             f"× each model's Birge ratio (inflate-only), applied to the "
             f"best fit\n\n")

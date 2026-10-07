@@ -63,6 +63,7 @@ install -m 644 "$PROJ/help_content.py"   "$STAGING/usr/share/caleneff/"
 # to the project and not added here is silently missing from the .deb and the
 # app dies with ModuleNotFoundError on Ubuntu while working fine on Windows.
 install -m 644 "$PROJ/spectratools_export.py" "$STAGING/usr/share/caleneff/"
+install -m 644 "$PROJ/caleneff_engine.py" "$STAGING/usr/share/caleneff/"
 install -m 644 "$PROJ/226Ra_En_Area.txt" "$STAGING/usr/share/caleneff/"
 install -m 644 "$PROJ/demo1.txt"         "$STAGING/usr/share/caleneff/"
 install -m 644 "$PROJ/demo2.txt"         "$STAGING/usr/share/caleneff/"

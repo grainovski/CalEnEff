@@ -77,6 +77,7 @@ install -d %{buildroot}/usr/share/caleneff
 install -m 644 %{_sourcedir}/ra226_gui.py       %{buildroot}/usr/share/caleneff/
 install -m 644 %{_sourcedir}/help_content.py    %{buildroot}/usr/share/caleneff/
 install -m 644 %{_sourcedir}/spectratools_export.py %{buildroot}/usr/share/caleneff/
+install -m 644 %{_sourcedir}/caleneff_engine.py %{buildroot}/usr/share/caleneff/
 install -m 644 %{_sourcedir}/build_info.py      %{buildroot}/usr/share/caleneff/
 install -m 644 %{_sourcedir}/226Ra_En_Area.txt  %{buildroot}/usr/share/caleneff/
 install -m 644 %{_sourcedir}/demo1.txt          %{buildroot}/usr/share/caleneff/

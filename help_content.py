@@ -135,78 +135,97 @@ def build_howto_html():
    with a Ra-226 reference source.</p>
 
 <h2>1 — Prepare your data file</h2>
-<p>CalEnEff reads plain-text files with seven whitespace-separated columns:</p>
-<pre>ch    Δch    N    ΔN    E[keV]    I[%]    ΔI[%]</pre>
+<p>CalEnEff reads plain-text files with seven whitespace-separated columns,
+one row per photopeak, and an optional eighth:</p>
+<pre>ch    Δch    N    ΔN    E[keV]    I[%]    ΔI[%]    [ΔE keV]</pre>
 <ul>
   <li><code>ch</code> — centroid channel of the photopeak</li>
-  <li><code>Δch</code> — uncertainty on the centroid (e.g. from Gaussian fit FWHM / 2.35)</li>
+  <li><code>Δch</code> — uncertainty on the centroid (from the peak fit; it is the energy fit's weight)</li>
   <li><code>N</code> — net peak area (counts)</li>
-  <li><code>ΔN</code> — uncertainty on net area</li>
-  <li><code>E</code> — known gamma-ray energy in keV</li>
-  <li><code>I</code> — emission probability in % (from NNDC or BIPM)</li>
+  <li><code>ΔN</code> — uncertainty on the net area (never below √N)</li>
+  <li><code>E</code> — reference gamma-ray energy in keV</li>
+  <li><code>I</code> — emission probability in %</li>
   <li><code>ΔI</code> — uncertainty on I in %</li>
+  <li><code>ΔE</code> — <em>optional</em> uncertainty of the reference energy in keV.
+      Without it the energies are treated as exact; with it the energy fit
+      uses the effective variance σ² = Δch² + (dch/dE · ΔE)².</li>
 </ul>
-<p>Lines starting with <code>#</code> are treated as comments. A blank line or
-a line with fewer than 7 numbers is skipped. Two demo files
-(<code>demo1.txt</code>, <code>demo2.txt</code>) ship with the installer.</p>
+<p>Lines starting with <code>#</code> are comments and blank lines are
+ignored. Every other line must have the same number of columns (7 or 8);
+a file that does not is rejected with the offending row named, as are
+non-positive Δch, E, N or I and negative uncertainties. At least 4 lines
+are needed; the Radware model needs 5 (6 for a Birge ratio).
+<code>226Ra_En_Area.txt</code> loads automatically at start-up; two more
+samples, <code>demo1.txt</code> (Ba-133) and <code>demo2.txt</code>
+(Eu-152), ship with the program.</p>
 
 <h2>2 — Load the file</h2>
-<p>Click <strong>Browse</strong> (or drag-and-drop) to open a data file.
-The table on the left is populated immediately. The first row of valid
-data is highlighted; all rows are selected by default.</p>
-<p>To exclude a line from the fit, uncheck its checkbox in the leftmost column.
-Excluded rows are grayed out but remain visible for reference.</p>
+<p>Click <strong>📂 Read calibration data</strong>, or use
+<strong>File ▾ → Open…</strong> (<kbd>Ctrl+O</kbd>). The status bar
+reports the number of peaks and the energy and channel ranges. All lines in
+the file are used; to leave a line out, comment it with <code>#</code>
+and load the file again.</p>
 
-<h2>3 — Energy calibration</h2>
-<ol>
-  <li>Select the <strong>Energy Calibration</strong> tab.</li>
-  <li>Choose <em>Linear</em> or <em>Quadratic</em> from the model selector.</li>
-  <li>Click <strong>Fit</strong>. The fitted curve and residuals are drawn
-      immediately.</li>
-  <li>Check the residual plot and the Birge ratio <em>B</em>.
-      A value near 1 indicates a well-fitting model with realistic uncertainties.
-      See the Knowledge Database for interpretation details.</li>
-  <li>The result table shows the coefficients, their statistical
-      (1-σ) uncertainties, and — when B > 1 — Birge-scaled uncertainties.</li>
-</ol>
-<div class='note'><strong>Tip:</strong> Start with Linear. Switch to Quadratic
-only if the residuals show a clear parabolic trend or B ≫ 1.</div>
-
-<h2>4 — Efficiency calibration</h2>
-<ol>
-  <li>Select the <strong>Efficiency Calibration</strong> tab.</li>
-  <li>The same data file is used; measured efficiency ε<sub>i</sub> is
-      computed internally from the N and I columns.</li>
-  <li>Click <strong>Fit</strong>. The four-parameter model
-      ε(E) = (a·E + b/E)·exp(c·E + d/E) is fitted by weighted
-      non-linear least squares.</li>
-  <li>Monte Carlo uncertainty propagation (10 000 trials) produces
-      the parameter covariance, from which the efficiency and its
-      uncertainty at any energy can be evaluated.</li>
-</ol>
-
-<h2>5 — Query a specific energy</h2>
-<p>After a successful fit, type an energy in the <strong>Query</strong> field
-and press <kbd>Enter</kbd> (or click <strong>Evaluate</strong>).
-CalEnEff returns:</p>
+<h2>3 — Calibrate</h2>
+<p>Click <strong>⚙ Make calibration</strong>. This runs both calibrations
+in one go, with a progress bar:</p>
 <ul>
-  <li>Fitted efficiency ε̂ and its ±1-σ MC uncertainty.</li>
-  <li>For the energy calibration: the channel number corresponding to
-      that energy, with propagated uncertainty.</li>
+  <li><strong>Energy</strong>: linear and quadratic ch(E) by weighted least
+      squares, plus 10 000 Monte Carlo refits.</li>
+  <li><strong>Efficiency</strong>: ε = N/I fitted with KRF and Radware, each
+      with 10 000 Monte Carlo refits (a few seconds to a minute).</li>
 </ul>
+<p>The left plot shows the energy calibration and its residuals, the right
+plot ε(E) with both curves, their 1σ bands and the residuals. The status
+bar reports how many Monte Carlo refits succeeded and any warning. Check
+the residuals and the Birge ratio <em>B</em> = √(χ²/ndf): <em>B</em> ≈ 1 means
+the scatter matches the stated uncertainties; <em>B</em> ≫ 1 means it does
+not, and the bands are widened by <em>B</em>.</p>
+<p>The results file <code>&lt;data file&gt;_Res.txt</code> is written beside
+the data file (or in Documents when that folder is read-only). It holds the
+fitted parameters with their statistical and Birge-scaled uncertainties,
+χ²/ndf, the Monte Carlo checks, the observed and fitted points, a
+<strong>NOTES</strong> section with any caveats about the fits, and every
+query you make afterwards.</p>
 
-<h2>6 — Export results</h2>
-<p>Click <strong>Save Results</strong> to write a structured text report
-to the same directory as the input file. The file contains the fit
-coefficients, covariance matrix, Birge ratio, and all queried values.</p>
+<h2>4 — Energy from a channel</h2>
+<p>Enter <strong>ch₀</strong> and its uncertainty <strong>Δch₀</strong> and
+press <kbd>Enter</kbd> or <strong>⟶ Calculate Energy</strong>. For the
+linear and the quadratic calibration you get the <strong>best-fit</strong>
+energy (the value to report), its <strong>1σ</strong> (your Δch₀ plus the
+calibration's own uncertainty, the latter scaled by <em>B</em>), and the
+Monte Carlo mean as a check. A channel outside the calibrated range is
+flagged as extrapolated.</p>
+
+<h2>5 — Efficiency at an energy</h2>
+<p>Enter <strong>E₀</strong> in keV and press <kbd>Enter</kbd> or
+<strong>⟶ Get Efficiency</strong>. For each model you get the
+<strong>best-fit</strong> efficiency, its asymmetric 1σ (the same rule the
+band uses), and the Monte Carlo median with its bias check <em>z</em>. The
+query log also records the KRF − Radware difference, a model uncertainty
+that neither 1σ contains. <strong>a.u. → %</strong> switches the display to
+percent of the KRF maximum inside the data. Energies outside the
+calibrated range are flagged as extrapolated.</p>
+
+<h2>6 — Save and export</h2>
+<ul>
+  <li><strong>File ▾ → Save</strong> (<kbd>Ctrl+S</kbd>) confirms or re-writes
+      the results file; <strong>Save as…</strong> copies it under a new name
+      and appends later queries there.</li>
+  <li><strong>File ▾ → Export for SpectraTools…</strong> writes the energy
+      coefficients and the relative efficiency per channel and per peak.</li>
+  <li>Right-click a plot panel to save that panel (PNG, PDF, SVG, EPS, …);
+      right-click the figure margin to save the whole figure.</li>
+  <li><strong>✕ Clear</strong> removes the query markers from both plots.</li>
+</ul>
 
 <h2>Keyboard shortcuts</h2>
 <table>
   <tr><th>Key</th><th>Action</th></tr>
   <tr><td><kbd>F1</kbd></td><td>Open this HowTo page</td></tr>
-  <tr><td><kbd>Enter</kbd></td><td>Evaluate query field</td></tr>
-  <tr><td><kbd>Ctrl+O</kbd></td><td>Open file dialog</td></tr>
-  <tr><td><kbd>Ctrl+S</kbd></td><td>Save results</td></tr>
+  <tr><td><kbd>Enter</kbd></td><td>In ch₀ / Δch₀: calculate energy; in E₀: get efficiency</td></tr>
+  <tr><td><kbd>Ctrl+O</kbd></td><td>Open a data file</td></tr>
+  <tr><td><kbd>Ctrl+S</kbd></td><td>Save the results file</td></tr>
 </table>
 """
     return _page("HowTo", body)
@@ -322,7 +341,7 @@ Shaded bands: <span style="color:#b08000">&#9632;</span> Ba-133 (53–384 keV),
 <!-- ── Data file ─────────────────────────────────────────────── -->
 <h2>Data file format</h2>
 <p>Each row represents one resolved photopeak:</p>
-<pre>ch    Δch    N    ΔN    E[keV]    I[%]    ΔI[%]</pre>
+<pre>ch    Δch    N    ΔN    E[keV]    I[%]    ΔI[%]    [ΔE keV]</pre>
 <table>
   <tr><th>Column</th><th>Symbol</th><th>Description</th></tr>
   <tr><td><code>ch</code></td><td>c</td>
@@ -339,6 +358,10 @@ Shaded bands: <span style="color:#b08000">&#9632;</span> Ba-133 (53–384 keV),
       <td>Emission probability in % per disintegration of the parent</td></tr>
   <tr><td><code>ΔI</code></td><td>σ<sub>I</sub></td>
       <td>Absolute uncertainty on I in % (same units as I)</td></tr>
+  <tr><td><code>ΔE</code></td><td>σ<sub>E</sub></td>
+      <td><em>Optional 8th column.</em> Uncertainty of the reference energy,
+          keV. Used by effective variance in the energy fit,
+          σ² = Δch² + (dch/dE · ΔE)²; without it energies are exact.</td></tr>
 </table>
 <p>Lines beginning with <code>#</code> and blank lines are ignored.
 All numeric values must be positive; CalEnEff skips rows that fail this
@@ -440,6 +463,15 @@ The Radware model requires more calibration points than the 4-parameter
 CalEnEff model and is preferred when the full energy range of a
 high-resolution HPGe detector must be covered.
 See: <a href="https://radware.phy.ornl.gov/gf3/">radware.phy.ornl.gov/gf3/</a></p>
+<p><strong>Units.</strong> The combination acts on ln ε itself, so it is
+not indifferent to the unit of ε: rescaling ε shifts both branches by the
+same constant and changes how they join. CalEnEff's ε = N/I is in arbitrary
+units (they depend on live time, activity and whether I is in % or a
+fraction), so before fitting it rescales ε to a fixed convention —
+geometric mean e<sup>9.5</sup> — and divides the scale back out
+afterwards. The factor <em>k</em> is listed with the parameters. Without it,
+data with ε of order 1 (ln ε crossing 0) were fitted badly: on the example
+dataset scaled that way, χ² rose from 452 to 525 and ε(843 keV) moved 10 %.</p>
 
 <h3>Measured efficiency</h3>
 <p>CalEnEff fits the <em>relative</em> efficiency, in arbitrary units:</p>
@@ -477,6 +509,19 @@ k = 1 … 10 000      (energy calibration: cᵢ⁽ᵏ⁾ ~ 𝒩( cᵢ, σᵢ ))<
 distribution at the query energy E*. Refitting captures the non-linearity
 of the fit itself, which sampling θ from a linearised covariance would not.
 The spread is then multiplied by the model's Birge ratio when B > 1.</p>
+<p>A drawn N or I that comes out zero or negative is redrawn on its own,
+which truncates that point's distribution at zero — the physical
+constraint. (Earlier versions discarded the whole replicate, which with
+50 % area uncertainties threw away 42 % of the replicates and biased the
+rest.) Each refit starts from the model's best fit, so it stays in the same
+χ² minimum as the plotted curve.</p>
+<p><strong>What the Monte Carlo does not include.</strong> The emission
+probabilities are drawn independently; correlations between them (a common
+normalisation, or lines sharing a decay branch) are not in the input file
+and are therefore ignored. A common normalisation error cancels in a
+relative efficiency. Systematic effects — true-coincidence summing above
+all — are not random scatter: when they inflate the Birge ratio, the band is
+widened as if they were, and the results file says so in its NOTES.</p>
 <p>Every refit starts from the model's own best fit. The start is the same
 fixed point for every refit — not the previous refit's result — so the
 samples stay independent, and each refit converges in the same χ² minimum

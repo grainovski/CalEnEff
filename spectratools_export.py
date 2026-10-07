@@ -54,6 +54,12 @@ def energy_cal_channel_to_energy(engine):
     return -a / b, 1.0 / b
 
 
+def engine_f_krf(engine, E):
+    """The KRF best fit at E (used when there are no MC samples)."""
+    from caleneff_engine import f_krf
+    return f_krf(np.asarray(E, dtype=float), *engine.eff_popt)
+
+
 def relative_efficiency_curves(engine, energies):
     """(eff_krf, deff_krf, eff_rw, deff_rw) at `energies`, normalised.
 
@@ -79,12 +85,22 @@ def relative_efficiency_curves(engine, energies):
         knots = E
     else:
         knots = np.linspace(E.min(), E.max(), EXPORT_KNOTS)
-    rows = []
-    for k in knots:
-        r = engine.predict_efficiency(k)
-        rows.append([r["krf"]["value"], r["krf"]["sigma"],
-                     r["rw"]["value"], r["rw"]["sigma"]])
-    picked = np.array(rows, dtype=float)
+    # All knots in one vectorised pass per model (in chunks inside
+    # engine.intervals) -- the same rule as predict_efficiency, without one
+    # Python call per knot.  A model without MC samples still exports its
+    # best fit, with NaN uncertainty.
+    nan = np.full(len(knots), np.nan)
+    kiv = engine.intervals("krf", knots)
+    riv = engine.intervals("rw", knots)
+    with np.errstate(over="ignore", invalid="ignore", divide="ignore"):
+        k_val = (kiv["value"] if kiv is not None
+                 else engine_f_krf(engine, knots))
+        r_val = (riv["value"] if riv is not None
+                 else (engine.rw_curve(knots)
+                       if engine.radware_popt is not None else nan))
+    picked = np.column_stack([
+        k_val, kiv["sigma"] if kiv is not None else nan,
+        r_val, riv["sigma"] if riv is not None else nan]).astype(float)
     # NOT the maximum over the export's own energies: those run from about
     # 0 keV to the top channel, so that maximum was an extrapolated hump below
     # the data (137 keV on the shipped set) and disagreed with the app by 2.1%.
@@ -143,8 +159,9 @@ def header(engine, source_name, norm, e_lo, e_hi, npeaks,
     else:
         # The best fit -- the curve the eff_rw column holds.  This used to be
         # the mean of the MC parameter sets, which is not a fit to anything.
-        lines.append("Radware params     : %s"
-                     % ", ".join("%.12g" % v for v in e.radware_popt))
+        lines.append("Radware params     : %s   (fitted to k*eps, k = %.12g)"
+                     % (", ".join("%.12g" % v for v in e.radware_popt),
+                        e.radware_scale))
     lines += [
         "Monte Carlo        : KRF %d accepted, Radware %d accepted, "
         "%d samples rejected" % (e.mc_krf_ok, e.mc_rw_ok, e.mc_bad),
@@ -178,6 +195,13 @@ def write_files(engine, stem, channels, a_cal, b_cal):
     ch = np.arange(int(channels), dtype=float)
     E_ch = a_cal + b_cal * ch
     bins, norm = relative_efficiency_curves(e, E_ch)
+    inside = (E_ch >= float(e.E.min())) & (E_ch <= float(e.E.max()))
+    ch_in = np.flatnonzero(inside)
+    extrap_note = (
+        "extrapolated rows  : channels outside %d..%d (E outside the fitted "
+        "range) are model extrapolation, not calibration" % (ch_in[0], ch_in[-1])
+        if len(ch_in) else
+        "extrapolated rows  : ALL - no channel falls inside the fitted range")
     bins_path = stem + "_bins.txt"
     with open(bins_path, "w", encoding="utf-8") as fh:
         fh.write(header(
@@ -188,6 +212,7 @@ def write_files(engine, stem, channels, a_cal, b_cal):
                 "one row per channel, evaluated through the energy "
                 "calibration above",
                 "curves interpolated from at most %d knots" % EXPORT_KNOTS,
+                extrap_note,
             ]))
         for E_i, row in zip(E_ch, bins):
             fh.write("%14.6f %15.8g %15.8g %15.8g %15.8g\n"

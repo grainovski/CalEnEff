@@ -1,6 +1,6 @@
 """Engine test suite -- headless, no display required.
 
-51 checks over CalibrationEngine: the numerically stable quadratic inversion,
+60 checks over CalibrationEngine: the numerically stable quadratic inversion,
 input-file validation, a full 10 000-iteration calibration, Monte Carlo
 reproducibility, the empty-MC guard, the vectorised confidence bands, and --
 since the 2026-09-24 scientific audit -- in-range normalisation, Birge-scaled
@@ -9,9 +9,9 @@ MC ensembles are centred on their best fit (on the shipped AND the pre-v4.8
 dataset), that band and query follow one interval rule, and the Radware
 second-minimum report.
 
-    python verify/verify_v4.py        # expect 51 PASS, "ALL CHECKS PASSED"
+    python verify/verify_v4.py        # expect 60 PASS, "ALL CHECKS PASSED"
 
-Count the PASS lines, not the verdict: fewer than 51 means an incomplete
+Count the PASS lines, not the verdict: fewer than 60 means an incomplete
 environment, not a healthy project.  Exits non-zero on any failure.
 
 If your console is not UTF-8, run with PYTHONIOENCODING=utf-8 PYTHONUTF8=1 --
@@ -266,7 +266,7 @@ check("query and band follow one rule (Radware, at a grid energy)",
       f"+{_qg['plus']:.1f}/-{_qg['minus']:.1f}")
 _q = eng.predict_efficiency(843.0)["rw"]
 check("query value is the Radware best fit, not an MC statistic",
-      _q["value"] == float(G.f_radware_5p(843.0, *eng.radware_popt)),
+      _q["value"] == float(eng.rw_curve(843.0)),
       f"843 keV: {_q['value']:.2f}  (MC median {_q['median']:.2f})")
 
 # Controls: the interval rule must flag a biased ensemble and must not let an
@@ -296,17 +296,136 @@ check("Radware second minimum found and reported",
 _old = G.CalibrationEngine()
 _old.load(str(REPO / "verify" / "fixtures" / "226Ra_En_Area_pre_v4.8.txt"))
 _old.calibrate()
-_n_saved, G.N_MC_EFF = G.N_MC_EFF, 2000
+_n_saved, G.caleneff_engine.N_MC_EFF = G.caleneff_engine.N_MC_EFF, 2000
 try:
     _old.calibrate_efficiency()
 finally:
-    G.N_MC_EFF = _n_saved
+    G.caleneff_engine.N_MC_EFF = _n_saved
 _w = _worst_offset(_old, "rw")
 check("pre-v4.8 data: Radware MC accepted and centred (parset fallback used)",
       _old.mc_rw_ok >= 0.99 * 2000 and _old.mc_rw_fallback > 0 and _w < 0.5
       and not _old.mc_health_warnings(),
       f"ok {_old.mc_rw_ok}/2000, fallback {_old.mc_rw_fallback}, "
       f"worst {_w:.3f} sigma, max|z| {_old.rw_bias_z:.3f}")
+
+# ── 13. v4.10 audit fixes (2026-10-07) ───────────────────────────────────
+CE = G.caleneff_engine
+_raw = np.loadtxt(DATA)
+
+def _quick(arr, n_mc=500, label="q"):
+    """Calibrate a modified copy of the shipped data with a short MC."""
+    p = os.path.join(os.environ["TEMP"], f"_v4_{label}.txt")
+    np.savetxt(p, arr)
+    e = G.CalibrationEngine(); e.load(p); e.calibrate()
+    saved, CE.N_MC_EFF = CE.N_MC_EFF, n_mc
+    try:
+        e.calibrate_efficiency()
+    finally:
+        CE.N_MC_EFF = saved
+        os.remove(p)
+    return e
+
+# Radware is fitted to rescaled eps, so its result no longer depends on the
+# unit of eps.  Without the rescale, eps ~ 1-4 (ln eps across 0) moved
+# eps(843) by +10 %; CONTROL below shows the raw fit really does differ.
+_lo = _raw.copy(); _lo[:, 2] *= 1e-4; _lo[:, 3] *= 1e-4
+_elo = _quick(_lo, 200, "units")
+_r843 = float(_elo.rw_curve(843.0)) / 1e-4
+check("Radware independent of the units of eps (eps scaled 1e-4)",
+      abs(_r843 / float(eng.rw_curve(843.0)) - 1) < 1e-3,
+      f"{_r843:.1f} vs {float(eng.rw_curve(843.0)):.1f}  (k = {_elo.radware_scale:.4g})")
+_y = _elo.eff; _dy = _elo.deff
+_best = np.inf; _pb = None
+for _s in [CE._radware_p0_5p(_elo.E, _y)] + CE._radware_extra_starts(_elo.E, _y, 60):
+    try:
+        with np.errstate(all="ignore"):
+            _pp, _ = CE.curve_fit(G.f_radware_5p, _elo.E, _y, p0=_s, sigma=_dy,
+                                 absolute_sigma=True, method="lm", maxfev=20000)
+            _c = float(np.sum(((_y - G.f_radware_5p(_elo.E, *_pp)) / _dy) ** 2))
+        if np.all(np.abs(_pp) < 500) and _c < _best: _best, _pb = _c, _pp
+    except Exception:
+        pass
+check("CONTROL: the raw (unscaled) Radware fit at eps ~ 1-4 is degraded",
+      _best > eng.radware_chi2 + 20,
+      f"raw chi2 {_best:.1f} vs {eng.radware_chi2:.1f}")
+
+# A non-positive N or I is redrawn individually instead of discarding the
+# whole replicate (42 % were discarded at dN = 50 %).
+_wide = _raw.copy(); _wide[:, 3] = 0.5 * _wide[:, 2]
+_ew = _quick(_wide, 500, "wide")
+check("MC keeps every replicate when dN is large (values redrawn, none lost)",
+      _ew.mc_krf_ok == 500 and _ew.mc_bad == 0 and _ew.mc_redrawn > 0,
+      f"KRF ok {_ew.mc_krf_ok}/500, redrawn {_ew.mc_redrawn}, abandoned {_ew.mc_bad}")
+
+# Jacobians given to LM agree with central differences.
+_E = eng.E
+def _num_jac(f, p, h=1e-6):
+    p = np.asarray(p, float); J = []
+    for j in range(len(p)):
+        d = np.zeros_like(p); d[j] = h * max(abs(p[j]), 1.0)
+        J.append((f(_E, *(p + d)) - f(_E, *(p - d))) / (2 * d[j]))
+    return np.array(J).T
+_jk = CE._krf_jac(_E, *eng.eff_popt); _nk = _num_jac(G.f_krf, eng.eff_popt)
+_jr = CE._radware_5p_jac(_E, *eng.radware_popt); _nr = _num_jac(G.f_radware_5p, eng.radware_popt)
+check("KRF analytic and Radware vectorised Jacobians match central differences",
+      np.allclose(_jk, _nk, rtol=1e-5, atol=1e-6 * np.abs(_nk).max())
+      and np.allclose(_jr, _nr, rtol=1e-4, atol=1e-5 * np.abs(_nr).max()),
+      f"max rel KRF {np.max(np.abs(_jk - _nk)) / np.abs(_nk).max():.1e}, "
+      f"Radware {np.max(np.abs(_jr - _nr)) / np.abs(_nr).max():.1e}")
+
+# Chunked band evaluation equals the unchunked interval rule.
+_full = G._mc_interval(*eng._model_samples("rw", eng.eff_grid))
+check("chunked bands identical to one-shot evaluation",
+      np.allclose(_full["lo"], eng.band_rw["lo"], equal_nan=True)
+      and np.allclose(_full["hi"], eng.band_rw["hi"], equal_nan=True))
+
+# Optional 8th column: dE = 0 changes nothing; dE > 0 enters by effective
+# variance and lowers chi2 (the energies are no longer treated as exact).
+_e8z = G.CalibrationEngine()
+_p8 = os.path.join(os.environ["TEMP"], "_v4_dE.txt")
+np.savetxt(_p8, np.column_stack([_raw, np.zeros(len(_raw))])); _e8z.load(_p8); _e8z.calibrate()
+np.savetxt(_p8, np.column_stack([_raw, np.full(len(_raw), 0.02)]))
+_e8 = G.CalibrationEngine(); _e8.load(_p8); _e8.calibrate(); os.remove(_p8)
+check("dE column: zeros reproduce the 7-column fit exactly; 0.02 keV lowers chi2",
+      np.array_equal(_e8z.popt1, eng.popt1)
+      and np.array_equal(_e8z.params_lin, eng.params_lin)
+      and _e8.chi2_1 < eng.chi2_1,
+      f"chi2_1 {eng.chi2_1:.1f} -> {_e8.chi2_1:.1f}  B1 {eng.birge1:.2f} -> {_e8.birge1:.2f}")
+
+# Fit notes: the shipped data carries the systematic-Birge and model-spread
+# notes; a 4-line file explains why Radware is missing.
+_notes = eng.fit_notes()
+_e4 = G.CalibrationEngine()
+_p4 = os.path.join(os.environ["TEMP"], "_v4_four.txt")
+np.savetxt(_p4, _raw[[0, 7, 14, 22]]); _e4.load(_p4); _e4.calibrate()
+_s4, CE.N_MC_EFF = CE.N_MC_EFF, 100
+try: _e4.calibrate_efficiency()
+finally: CE.N_MC_EFF = _s4; os.remove(_p4)
+check("fit notes: systematic Birge + model spread here; missing Radware explained",
+      any("Birge ratio" in n for n in _notes) and any("KRF and Radware differ" in n for n in _notes)
+      and any("Radware not fitted" in n for n in _e4.fit_notes()),
+      f"{len(_notes)} notes; 4-line file: {_e4.fit_notes()[0][:60]}")
+
+# A run that fails part-way must not leave the previous results marked ready.
+_orig = CE.CalibrationEngine._build_eff_bands
+CE.CalibrationEngine._build_eff_bands = lambda self: (_ for _ in ()).throw(RuntimeError("x"))
+_s4, CE.N_MC_EFF = CE.N_MC_EFF, 20
+try:
+    _e4.calibrate_efficiency()
+except RuntimeError:
+    pass
+finally:
+    CE.CalibrationEngine._build_eff_bands = _orig; CE.N_MC_EFF = _s4
+check("failed efficiency run leaves eff_ready False", _e4.eff_ready is False)
+
+# The export's vectorised curves follow the same rule as a single query.
+_kn = np.array([300.0, 843.0, 2000.0])
+_cur2, _ = X.relative_efficiency_curves(eng, _kn)
+_pq = eng.predict_efficiency(843.0)
+check("export curves == predict_efficiency (value and sigma, both models)",
+      np.allclose(_cur2[1] * eng.eff_peak,
+                  [_pq["krf"]["value"], _pq["krf"]["sigma"],
+                   _pq["rw"]["value"], _pq["rw"]["sigma"]], rtol=1e-12))
 
 print("\n" + ("ALL CHECKS PASSED" if not fails else f"FAILURES: {fails}"))
 sys.exit(1 if fails else 0)

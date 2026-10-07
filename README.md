@@ -24,11 +24,15 @@ not scatter around the best fit.
 
 ## Input file format
 
-7 columns, whitespace-separated, no header — one row per gamma peak:
+7 columns, whitespace-separated, no header — one row per gamma peak — and an
+optional 8th, the reference-energy uncertainty:
 
 ```
-ch   Δch   N   ΔN   E[keV]   I[%]   ΔI[%]
+ch   Δch   N   ΔN   E[keV]   I[%]   ΔI[%]   [ΔE keV]
 ```
+
+With ΔE the energy fit uses the effective variance σ² = Δch² + (dch/dE·ΔE)²;
+without it the energies are treated as exact.
 
 `226Ra_En_Area.txt` (23 Ra-226 peaks) auto-loads when found beside the
 executable.  Two extra sample sets, `demo1.txt` (Ba-133, 9 peaks) and
@@ -147,14 +151,14 @@ instance: `wsl --install AlmaLinux-10 --name AlmaStock --no-launch`.
 ## Tests
 
 ```bash
-python verify/verify_v4.py     # 51 checks — engine, headless
-python verify/verify_gui.py    # 33 checks — real Tk widgets, needs a display, ~20 s
+python verify/verify_v4.py     # 60 checks — engine, headless
+python verify/verify_gui.py    # 35 checks — real Tk widgets, needs a display, ~20 s
 ```
 
 Both exit non-zero on failure and locate the repo from their own path, so
 they run unedited from any checkout.
 
-**Count the PASS lines, not the verdict.** Fewer than 51 and 33 means an
+**Count the PASS lines, not the verdict.** Fewer than 60 and 35 means an
 incomplete environment rather than a healthy project — a suite that silently
 collects fewer checks looks identical to success.
 
@@ -166,12 +170,12 @@ Two things worth knowing:
 * `verify_gui.py` **overwrites `226Ra_En_Area_Res.txt`** — every calibration
   rewrites that file from scratch, so any query log in it is lost.
 
-A full calibration of the bundled dataset takes roughly 10–15 s on a modern
-desktop. Judge by a few runs, not one: on a hybrid-core Windows machine the
+A full calibration of the bundled dataset takes roughly 7–10 s on a modern
+desktop (measured 7.3 s, down from 11.1 s in v4.9, four paired runs). Judge by a few runs, not one: on a hybrid-core Windows machine the
 same run has been measured anywhere from 10 s to 50 s back to back, with no
 code change and an idle system, so a single slow run proves nothing. If it is
 *consistently* several times slower, check that the `OptimizeWarning` filter
-near the top of `ra226_gui.py` is still there — that one line was worth a 5×
+near the top of `caleneff_engine.py` is still there — that one line was worth a 5×
 difference when it went in.
 
 `build.ps1` exiting 0 does **not** prove the frozen executable runs. Launch it
@@ -218,7 +222,9 @@ it matters when the automatic write failed, e.g. a read-only directory.
 
 | File                        | Purpose                                       |
 |-----------------------------|-----------------------------------------------|
-| `ra226_gui.py`              | Main application — the only file to edit for app changes |
+| `ra226_gui.py`              | The window: widgets, plots, results file      |
+| `caleneff_engine.py`        | All calculations — fits, Monte Carlo, interval rule (no Tk) |
+| `spectratools_export.py`    | SpectraTools export (no Tk)                   |
 | `help_content.py`           | HowTo / Knowledge Database / About pages (opened in the browser) |
 | `Ra226_Calibration.spec`    | PyInstaller build recipe                      |
 | `Ra226_Calibration.iss`     | Inno Setup script — **defines the version**   |
@@ -252,7 +258,9 @@ it matters when the automatic write failed, e.g. a read-only directory.
   warm-started from the best fit (a fixed start, so no chain bias) and
   fall back to `parset()` only when that refit is rejected.  A second
   minimum within Δχ²/B² < 1 is reported in the results file as a model
-  ambiguity.
+  ambiguity.  ε is rescaled to a fixed log range before the fit (Radford's
+  combination acts on ln ε, so the shape would otherwise depend on the
+  units of ε) and the factor is divided back out.
 * **Birge ratio** `B = √(χ²/ndf)` is reported and used to scale the
   reported 1 σ band when the data scatter exceeds the stated σ
   ([reference](https://arxiv.org/html/2406.08293v3)).

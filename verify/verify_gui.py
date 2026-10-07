@@ -1,12 +1,12 @@
 """GUI test suite -- drives the real Tk widgets end to end.
 
-33 checks: load (including rejection of a malformed file), a full calibration
+35 checks: load (including rejection of a malformed file), a full calibration
 through the button handler, energy and efficiency queries, the a.u./% toggle,
 the theme switch, extrapolated queries that must not crash the plot AND must
 be flagged (with in-range controls that must not be), % mode reading 100 at
 the in-range peak, clear, and the contents of the generated results file.
 
-    python verify/verify_gui.py       # expect 33 PASS, "ALL GUI CHECKS PASSED"
+    python verify/verify_gui.py       # expect 35 PASS, "ALL GUI CHECKS PASSED"
 
 Needs a display: it really does construct the App (withdrawn, so nothing
 appears on screen).  Takes ~90 s -- it runs two real calibrations.
@@ -77,6 +77,10 @@ check("energy query filled", e_first != "—", f"E_lin={e_first}")
 app._calculate()
 check("energy query reproducible in UI", app._lin_E_mc.get() == e_first,
       f"{e_first} == {app._lin_E_mc.get()}")
+_q = app.engine.predict(2000.0, 0.5)
+check("energy query reports the best fit; MC mean is the check row",
+      app._lin_E_bf.get() == f"{_q[4]:.4f}" and app._lin_E_mc.get() == f"{_q[0]:.4f}",
+      f"best fit {app._lin_E_bf.get()}  MC mean {app._lin_E_mc.get()}")
 
 # ── efficiency query ────────────────────────────────────────────────────
 app.E_q_var.set("1000")
@@ -155,6 +159,11 @@ if app._res_file and os.path.isfile(app._res_file):
           txt.count("MC check") >= 2 and "Second minimum" in txt
           and "ε(MC mean)" not in txt and "bias check z" in txt,
           f"{txt.count('MC check')} MC-check lines")
+    check("results file carries the fit notes and the model difference",
+          "NOTES" in txt and "KRF and Radware differ" in txt
+          and "Model difference KRF − Radware" in txt
+          and "E(MC mean)" not in txt and "(best fit)" in txt,
+          f"{txt.count('Model difference')} model-difference lines")
     check("results file logged queries", txt.count("ENERGY QUERY") >= 1,
           f"{txt.count('ENERGY QUERY')} energy, {txt.count('EFFICIENCY QUERY')} eff")
     # three out-of-range queries were made (E=1, E=50000, ch=99999)
