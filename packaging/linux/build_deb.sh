@@ -113,6 +113,17 @@ chmod 755 "$STAGING/usr/bin/caleneff"
 cat > /tmp/changelog <<EOF
 caleneff (${VER}) stable; urgency=low
 
+  * Energy queries show the Monte Carlo median as their check value (was
+    the mean), the same statistic as efficiency queries.
+  * Knowledge Database: the Birge ratio explained in depth (how close to 1
+    is 1, what a large B means, how CalEnEff applies it, what it cannot
+    fix), and a new section on why the best fit is reported and the MC
+    median shown only as a check.
+
+ -- grainovski <grainovski@googlemail.com>  $(date -R)
+
+caleneff (4.10) stable; urgency=low
+
   * Radware is fitted to rescaled efficiencies, so its result no longer
     depends on the units of eps (eps ~ 1 used to move eps(843) by 10 %).
   * A non-positive N or I in the Monte Carlo is redrawn on its own instead
@@ -126,7 +137,7 @@ caleneff (${VER}) stable; urgency=low
     Calculations moved to caleneff_engine.py. HowTo rewritten to describe
     the actual program.
 
- -- grainovski <grainovski@googlemail.com>  $(date -R)
+ -- grainovski <grainovski@googlemail.com>  Wed, 07 Oct 2026 06:30:00 +0300
 
 caleneff (4.9) stable; urgency=low
 

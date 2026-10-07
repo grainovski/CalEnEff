@@ -1,7 +1,7 @@
 # Version is supplied by build_rpm.sh via --define "version X.Y", which reads
 # it from Ra226_Calibration.iss so the whole project has one source of truth.
 # The fallback below only applies when rpmbuild is invoked by hand.
-%{!?version: %define version 4.10}
+%{!?version: %define version 4.10.1}
 
 Name:           caleneff
 Version:        %{version}
@@ -149,6 +149,14 @@ if [ "$1" = "0" ]; then
 fi
 
 %changelog
+* Wed Oct 07 2026 grainovski <grainovski@googlemail.com> - 4.10.1-1
+- Energy queries show the Monte Carlo median as their check value (was the
+  mean), the same statistic as efficiency queries.
+- Knowledge Database: the Birge ratio explained in depth (how close to 1 is
+  1, what a large B means, how CalEnEff applies it, what it cannot fix), and
+  a new section on why the best fit is reported and the MC median shown
+  only as a check.
+
 * Wed Oct 07 2026 grainovski <grainovski@googlemail.com> - 4.10-1
 - Radware is fitted to rescaled efficiencies, so its result no longer
   depends on the units of eps (eps ~ 1 used to move eps(843) by 10 %%).
