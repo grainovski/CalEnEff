@@ -56,6 +56,18 @@ _PAGE_CSS = """
              padding: .7rem 1.1rem; font-family: "Consolas","Courier New",monospace;
              font-size: .9em; margin: .6rem 0 1rem; white-space: pre; }
   a { color: #0055bb; }
+  /* Radicals: the overbar spans the whole radicand, so the square root of
+     chi2/ndf cannot be misread as the root of chi2 divided by ndf. */
+  .sqrt { white-space: nowrap; }
+  .sqrt .rs  { font-family: "Cambria Math", "STIX Two Math", "Segoe UI Symbol",
+               "Segoe UI", serif; font-size: 1.1em; margin-right: -.04em; }
+  .sqrt .rad { display: inline-block; line-height: 1.05;
+               border-top: .075em solid currentColor; padding: .06em .1em 0 .08em; }
+  .nb  { white-space: nowrap; }
+  .fig { margin: .8rem 0 1.2rem; }
+  .fig svg { width: 100%; max-width: 680px; height: auto; display: block;
+             background: #fbfcfe; border: 1px solid #d0d7de; border-radius: 5px; }
+  figcaption { font-size: .88em; color: #555; margin: .35rem 0 0; }
 """
 
 
@@ -142,7 +154,7 @@ one row per photopeak, and an optional eighth:</p>
   <li><code>ch</code> — centroid channel of the photopeak</li>
   <li><code>Δch</code> — uncertainty on the centroid (from the peak fit; it is the energy fit's weight)</li>
   <li><code>N</code> — net peak area (counts)</li>
-  <li><code>ΔN</code> — uncertainty on the net area (never below √N)</li>
+  <li><code>ΔN</code> — uncertainty on the net area (never below <span class="sqrt"><span class="rs">√</span><span class="rad">N</span></span>)</li>
   <li><code>E</code> — reference gamma-ray energy in keV</li>
   <li><code>I</code> — emission probability in %</li>
   <li><code>ΔI</code> — uncertainty on I in %</li>
@@ -178,7 +190,7 @@ in one go, with a progress bar:</p>
 <p>The left plot shows the energy calibration and its residuals, the right
 plot ε(E) with both curves, their 1σ bands and the residuals. The status
 bar reports how many Monte Carlo refits succeeded and any warning. Check
-the residuals and the Birge ratio <em>B</em> = √(χ²/ndf): <em>B</em> ≈ 1 means
+the residuals and the Birge ratio <em>B</em> = <span class="sqrt"><span class="rs">√</span><span class="rad">χ²/ndf</span></span>: <em>B</em> ≈ 1 means
 the scatter matches the stated uncertainties; <em>B</em> ≫ 1 means it does
 not, and the bands are widened by <em>B</em>.</p>
 <p>The results file <code>&lt;data file&gt;_Res.txt</code> is written beside
@@ -351,7 +363,7 @@ Shaded bands: <span style="color:#b08000">&#9632;</span> Ba-133 (53–384 keV),
   <tr><td><code>N</code></td><td>N</td>
       <td>Net peak area (background-subtracted counts)</td></tr>
   <tr><td><code>ΔN</code></td><td>σ<sub>N</sub></td>
-      <td>Uncertainty on N (Poisson: √N is a lower bound for large counts)</td></tr>
+      <td>Uncertainty on N (Poisson: <span class="sqrt"><span class="rs">√</span><span class="rad">N</span></span> is a lower bound for large counts)</td></tr>
   <tr><td><code>E</code></td><td>E</td>
       <td>True gamma-ray energy in keV (from nuclear data tables)</td></tr>
   <tr><td><code>I</code></td><td>I</td>
@@ -393,13 +405,13 @@ Tabulated energies carry 0.002–0.1 keV uncertainties, and for a strong peak
 with a realistic centroid uncertainty the energy term can dominate — the
 ²¹⁴Pb 839.06 keV line, for example, is known only to ±0.09 keV. Prefer lines
 with small energy uncertainties, and never quote a centroid uncertainty below
-its statistical minimum σ_peak/√N.</p>
+its statistical minimum <span class="nb">σ_peak/<span class="sqrt"><span class="rs">√</span><span class="rad">N</span></span></span>.</p>
 <p>The covariance matrix of the parameters:</p>
 <div class='formula'>Cov(θ) = (AᵀWA)⁻¹     W = diag(1/σᵢ²)</div>
 
 <h3>Reported uncertainties</h3>
 <ul>
-  <li><strong>Statistical (1-σ)</strong> — √diag(Cov(θ)). Valid when the
+  <li><strong>Statistical (1-σ)</strong> — <span class="sqrt"><span class="rs">√</span><span class="rad">diag(Cov(θ))</span></span>. Valid when the
       model is correct and the input uncertainties are realistic.</li>
   <li><strong>Birge-scaled</strong> — statistical uncertainties × B.
       Applied automatically when B > 1.</li>
@@ -410,7 +422,7 @@ its statistical minimum σ_peak/√N.</p>
 
 <!-- ── Birge ratio ────────────────────────────────────────────── -->
 <h2>Birge ratio</h2>
-<div class='formula'>B = √( χ²/ndf )     χ² = Σ ( (yᵢ − f(xᵢ; θ̂)) / σᵢ )²     ndf = n − p</div>
+<div class='formula'>B = <span class="sqrt"><span class="rs">√</span><span class="rad">χ²/ndf</span></span>     χ² = Σ ( (yᵢ − f(xᵢ; θ̂)) / σᵢ )²     ndf = n − p</div>
 <p>The Birge ratio (R. T. Birge, <em>Phys. Rev.</em> 40 (1932) 207) compares
 the scatter of the points about the fitted curve with the uncertainties you
 stated for them. If the model is right and every σᵢ is a true 1σ, each
@@ -421,7 +433,7 @@ curve?</em></p>
 
 <h3>How close to 1 is "1"?</h3>
 <p>Even with a perfect model and honest uncertainties, B fluctuates from one
-measurement to the next. Its spread is about 1/√(2·ndf):</p>
+measurement to the next. Its spread is about <span class="nb">1/<span class="sqrt"><span class="rs">√</span><span class="rad">2·ndf</span></span></span>:</p>
 <table>
   <tr><th>ndf</th><th>typical B (68 %)</th><th>B still plausible by chance (95 %)</th></tr>
   <tr><td>5</td><td>0.7 – 1.3</td><td>up to ≈ 1.5</td></tr>
@@ -442,7 +454,7 @@ and CalEnEff says so in the results file.</p>
   <tr><td>B &gt; 1</td>
       <td>The points scatter more than their uncertainties allow. One or
           more of: (1) the σᵢ are <strong>too small</strong> — a peak area
-          quoted better than √N, a centroid better than σ_peak/√N, a
+          quoted better than <span class="sqrt"><span class="rs">√</span><span class="rad">N</span></span>, a centroid better than <span class="nb">σ_peak/<span class="sqrt"><span class="rs">√</span><span class="rad">N</span></span></span>, a
           reference energy treated as exact; (2) the <strong>model is
           inadequate</strong> — ADC non-linearity a polynomial cannot
           follow, an efficiency shape the function cannot take; (3) a
@@ -575,7 +587,7 @@ rescale the curve.</p>
 <p>Activity uncertainty σ_A and live-time uncertainty are common to all
 points and shift the entire curve by a constant scale factor; they do
 not affect the fitted shape or the relative uncertainties. σ_N must include
-counting statistics — it can never be below √N — plus the background
+counting statistics — it can never be below <span class="sqrt"><span class="rs">√</span><span class="rad">N</span></span> — plus the background
 subtraction.</p>
 
 <h3>Non-linear fitting</h3>
@@ -742,6 +754,89 @@ give.</p>
 <div class='note'><strong>In short:</strong> report the best fit with its
 1σ; glance at the MC median (or z) to confirm the two agree; never report
 the median instead.</div>
+
+<h3>Why σ comes from the 15.87 %, 50 % and 84.13 % percentiles</h3>
+<p>Every efficiency uncertainty in CalEnEff — the plotted band, the query, the
+histogram and the SpectraTools export — is built from three percentiles of
+the Monte Carlo values: p16 = 15.87 %, p50 = 50 % (the median) and
+p84 = 84.13 %. The numbers are not arbitrary.</p>
+
+<h3>Where the numbers come from</h3>
+<p>For a normal distribution the fraction of outcomes below μ + kσ is the
+cumulative distribution Φ(k). At k = −1, 0, +1:</p>
+<div class='formula'>Φ(−1) = 0.1587  →  p15.87 = μ − σ
+Φ( 0) = 0.5000  →  p50    = μ
+Φ(+1) = 0.8413  →  p84.13 = μ + σ</div>
+<figure class="fig"><svg viewBox="0 0 680 250" role="img" aria-label="Gaussian distribution with the 15.87, 50 and 84.13 percent points" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI, Helvetica, Arial, sans-serif"><polygon points="263.9,200.0 263.9,109.3 266.0,107.0 268.2,104.7 270.3,102.5 272.5,100.2 274.7,98.0 276.8,95.8 279.0,93.6 281.1,91.4 283.3,89.2 285.4,87.1 287.6,85.0 289.7,82.9 291.9,80.9 294.0,78.9 296.2,76.9 298.3,75.0 300.5,73.2 302.6,71.4 304.8,69.7 306.9,68.0 309.1,66.4 311.3,64.8 313.4,63.3 315.6,61.9 317.7,60.6 319.9,59.3 322.0,58.1 324.2,57.0 326.3,55.9 328.5,55.0 330.6,54.1 332.8,53.4 334.9,52.7 337.1,52.1 339.2,51.6 341.4,51.1 343.5,50.8 345.7,50.6 347.8,50.4 350.0,50.4 352.2,50.4 354.3,50.6 356.5,50.8 358.6,51.1 360.8,51.6 362.9,52.1 365.1,52.7 367.2,53.4 369.4,54.1 371.5,55.0 373.7,55.9 375.8,57.0 378.0,58.1 380.1,59.3 382.3,60.6 384.4,61.9 386.6,63.3 388.8,64.8 390.9,66.4 393.1,68.0 395.2,69.7 397.4,71.4 399.5,73.2 401.7,75.0 403.8,76.9 406.0,78.9 408.1,80.9 410.3,82.9 412.4,85.0 414.6,87.1 416.7,89.2 418.9,91.4 421.0,93.6 423.2,95.8 425.3,98.0 427.5,100.2 429.7,102.5 431.8,104.7 434.0,107.0 436.1,109.3 436.1,200.0" fill="#0066cc" fill-opacity="0.18"/><polyline points="40.0,199.8 42.6,199.7 45.2,199.7 47.7,199.7 50.3,199.6 52.9,199.6 55.5,199.6 58.1,199.5 60.7,199.5 63.2,199.4 65.8,199.4 68.4,199.3 71.0,199.2 73.6,199.1 76.2,199.0 78.8,199.0 81.3,198.8 83.9,198.7 86.5,198.6 89.1,198.5 91.7,198.3 94.2,198.2 96.8,198.0 99.4,197.8 102.0,197.6 104.6,197.4 107.2,197.2 109.8,196.9 112.3,196.7 114.9,196.4 117.5,196.1 120.1,195.8 122.7,195.4 125.3,195.0 127.8,194.6 130.4,194.2 133.0,193.7 135.6,193.3 138.2,192.7 140.8,192.2 143.3,191.6 145.9,191.0 148.5,190.3 151.1,189.6 153.7,188.9 156.2,188.1 158.8,187.3 161.4,186.4 164.0,185.5 166.6,184.5 169.2,183.5 171.7,182.4 174.3,181.3 176.9,180.2 179.5,178.9 182.1,177.7 184.7,176.3 187.2,174.9 189.8,173.5 192.4,172.0 195.0,170.4 197.6,168.8 200.2,167.1 202.8,165.3 205.3,163.5 207.9,161.7 210.5,159.7 213.1,157.7 215.7,155.7 218.3,153.6 220.8,151.4 223.4,149.2 226.0,147.0 228.6,144.6 231.2,142.3 233.8,139.9 236.3,137.4 238.9,134.9 241.5,132.4 244.1,129.8 246.7,127.2 249.2,124.5 251.8,121.9 254.4,119.2 257.0,116.5 259.6,113.8 262.2,111.1 264.8,108.4 267.3,105.6 269.9,102.9 272.5,100.2 275.1,97.5 277.7,94.9 280.2,92.2 282.8,89.6 285.4,87.1 288.0,84.6 290.6,82.1 293.2,79.7 295.8,77.3 298.3,75.0 300.9,72.8 303.5,70.7 306.1,68.6 308.7,66.7 311.3,64.8 313.8,63.0 316.4,61.4 319.0,59.8 321.6,58.3 324.2,57.0 326.8,55.8 329.3,54.6 331.9,53.7 334.5,52.8 337.1,52.1 339.7,51.5 342.2,51.0 344.8,50.7 347.4,50.5 350.0,50.4 352.6,50.5 355.2,50.7 357.8,51.0 360.3,51.5 362.9,52.1 365.5,52.8 368.1,53.7 370.7,54.6 373.2,55.8 375.8,57.0 378.4,58.3 381.0,59.8 383.6,61.4 386.2,63.0 388.8,64.8 391.3,66.7 393.9,68.6 396.5,70.7 399.1,72.8 401.7,75.0 404.2,77.3 406.8,79.7 409.4,82.1 412.0,84.6 414.6,87.1 417.2,89.6 419.8,92.2 422.3,94.9 424.9,97.5 427.5,100.2 430.1,102.9 432.7,105.6 435.3,108.4 437.8,111.1 440.4,113.8 443.0,116.5 445.6,119.2 448.2,121.9 450.8,124.5 453.3,127.2 455.9,129.8 458.5,132.4 461.1,134.9 463.7,137.4 466.2,139.9 468.8,142.3 471.4,144.6 474.0,147.0 476.6,149.2 479.2,151.4 481.8,153.6 484.3,155.7 486.9,157.7 489.5,159.7 492.1,161.7 494.7,163.5 497.2,165.3 499.8,167.1 502.4,168.8 505.0,170.4 507.6,172.0 510.2,173.5 512.8,174.9 515.3,176.3 517.9,177.7 520.5,178.9 523.1,180.2 525.7,181.3 528.2,182.4 530.8,183.5 533.4,184.5 536.0,185.5 538.6,186.4 541.2,187.3 543.8,188.1 546.3,188.9 548.9,189.6 551.5,190.3 554.1,191.0 556.7,191.6 559.2,192.2 561.8,192.7 564.4,193.3 567.0,193.7 569.6,194.2 572.2,194.6 574.8,195.0 577.3,195.4 579.9,195.8 582.5,196.1 585.1,196.4 587.7,196.7 590.2,196.9 592.8,197.2 595.4,197.4 598.0,197.6 600.6,197.8 603.2,198.0 605.8,198.2 608.3,198.3 610.9,198.5 613.5,198.6 616.1,198.7 618.7,198.8 621.3,199.0 623.8,199.0 626.4,199.1 629.0,199.2 631.6,199.3 634.2,199.4 636.8,199.4 639.3,199.5 641.9,199.5 644.5,199.6 647.1,199.6 649.7,199.6 652.2,199.7 654.8,199.7 657.4,199.7 660.0,199.8" fill="none" stroke="#1a1a1a" stroke-width="1.8"/><line x1="263.9" y1="200.0" x2="263.9" y2="65.0" stroke="#0066cc" stroke-width="1.6" stroke-dasharray="5,3"/><text paint-order="stroke" stroke="#fbfcfe" stroke-width="4" stroke-linejoin="round" x="263.9" y="60.0" fill="#0066cc" font-size="12" text-anchor="middle">p15.87 = μ − σ</text><line x1="350.0" y1="200.0" x2="350.0" y2="38.8" stroke="#d9730d" stroke-width="1.6"/><text paint-order="stroke" stroke="#fbfcfe" stroke-width="4" stroke-linejoin="round" x="350.0" y="33.8" fill="#d9730d" font-size="12" text-anchor="middle">p50 = median = μ</text><line x1="436.1" y1="200.0" x2="436.1" y2="65.0" stroke="#0066cc" stroke-width="1.6" stroke-dasharray="5,3"/><text paint-order="stroke" stroke="#fbfcfe" stroke-width="4" stroke-linejoin="round" x="436.1" y="60.0" fill="#0066cc" font-size="12" text-anchor="middle">p84.13 = μ + σ</text><text paint-order="stroke" stroke="#fbfcfe" stroke-width="4" stroke-linejoin="round" x="350.0" y="155.0" font-size="13" text-anchor="middle" fill="#0066cc" font-weight="600">68.27 %</text><text paint-order="stroke" stroke="#fbfcfe" stroke-width="4" stroke-linejoin="round" x="113.2" y="171.9" font-size="12" text-anchor="middle" fill="#888888">15.87 %</text><text paint-order="stroke" stroke="#fbfcfe" stroke-width="4" stroke-linejoin="round" x="586.8" y="171.9" font-size="12" text-anchor="middle" fill="#888888">15.87 %</text><line x1="40" y1="200.0" x2="660" y2="200.0" stroke="#1a1a1a" stroke-width="1"/><line x1="91.7" y1="200.0" x2="91.7" y2="205.0" stroke="#1a1a1a"/><text paint-order="stroke" stroke="#fbfcfe" stroke-width="4" stroke-linejoin="round" x="91.7" y="218.0" font-size="12" text-anchor="middle" fill="#1a1a1a">μ−3σ</text><line x1="177.8" y1="200.0" x2="177.8" y2="205.0" stroke="#1a1a1a"/><text paint-order="stroke" stroke="#fbfcfe" stroke-width="4" stroke-linejoin="round" x="177.8" y="218.0" font-size="12" text-anchor="middle" fill="#1a1a1a">μ−2σ</text><line x1="263.9" y1="200.0" x2="263.9" y2="205.0" stroke="#1a1a1a"/><text paint-order="stroke" stroke="#fbfcfe" stroke-width="4" stroke-linejoin="round" x="263.9" y="218.0" font-size="12" text-anchor="middle" fill="#1a1a1a">μ−σ</text><line x1="350.0" y1="200.0" x2="350.0" y2="205.0" stroke="#1a1a1a"/><text paint-order="stroke" stroke="#fbfcfe" stroke-width="4" stroke-linejoin="round" x="350.0" y="218.0" font-size="12" text-anchor="middle" fill="#1a1a1a">μ</text><line x1="436.1" y1="200.0" x2="436.1" y2="205.0" stroke="#1a1a1a"/><text paint-order="stroke" stroke="#fbfcfe" stroke-width="4" stroke-linejoin="round" x="436.1" y="218.0" font-size="12" text-anchor="middle" fill="#1a1a1a">μ+σ</text><line x1="522.2" y1="200.0" x2="522.2" y2="205.0" stroke="#1a1a1a"/><text paint-order="stroke" stroke="#fbfcfe" stroke-width="4" stroke-linejoin="round" x="522.2" y="218.0" font-size="12" text-anchor="middle" fill="#1a1a1a">μ+2σ</text><line x1="608.3" y1="200.0" x2="608.3" y2="205.0" stroke="#1a1a1a"/><text paint-order="stroke" stroke="#fbfcfe" stroke-width="4" stroke-linejoin="round" x="608.3" y="218.0" font-size="12" text-anchor="middle" fill="#1a1a1a">μ+3σ</text><text paint-order="stroke" stroke="#fbfcfe" stroke-width="4" stroke-linejoin="round" x="350.0" y="242" font-size="12" text-anchor="middle" fill="#888888">Gaussian: the 15.87 / 50 / 84.13 % points fall exactly at μ − σ, μ, μ + σ</text></svg>
+<figcaption>Figure 1. For a Gaussian, the 15.87 %, 50 % and 84.13 % points are
+exactly μ − σ, μ and μ + σ, and the range between the outer two holds
+68.27 % of the outcomes — the probability content of ±1σ.</figcaption></figure>
+<p>So for Gaussian Monte Carlo values, half the 15.87–84.13 % range <em>is</em>
+the standard deviation:</p>
+<div class='formula'>σ₆₈ = (p84 − p16) / 2       = σ for a Gaussian</div>
+<p>It is a second way of measuring the same σ, not a different definition. On
+the bundled dataset, inside the calibrated range, std/σ₆₈ was 0.97–1.04.</p>
+
+<h3>Why not simply the standard deviation?</h3>
+<p>On a Gaussian the two agree. They differ only where the distribution is
+not Gaussian — and there the percentiles give the more meaningful
+number.</p>
+<p><strong>1. The same coverage for any shape.</strong> Whatever the
+distribution looks like, the 15.87–84.13 % interval still contains 68.27 % of
+the outcomes, which is the property a "1σ" is supposed to have. For a
+skewed or heavy-tailed distribution, mean ± std contains some other,
+unknown fraction.</p>
+<figure class="fig"><svg viewBox="0 0 680 250" role="img" aria-label="Skewed distribution: percentile interval versus mean plus or minus standard deviation" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI, Helvetica, Arial, sans-serif"><polygon points="125.2,200.0 125.2,99.6 126.6,98.2 128.0,97.0 129.5,95.9 130.9,94.8 132.3,93.9 133.8,93.0 135.2,92.2 136.7,91.5 138.1,90.9 139.5,90.4 141.0,90.0 142.4,89.6 143.8,89.3 145.3,89.1 146.7,89.0 148.1,88.9 149.6,88.9 151.0,88.9 152.4,89.0 153.9,89.2 155.3,89.4 156.7,89.7 158.2,90.0 159.6,90.4 161.0,90.8 162.5,91.3 163.9,91.8 165.3,92.4 166.8,93.0 168.2,93.6 169.6,94.2 171.1,94.9 172.5,95.6 173.9,96.4 175.4,97.1 176.8,97.9 178.2,98.7 179.7,99.6 181.1,100.4 182.5,101.3 184.0,102.2 185.4,103.1 186.8,104.0 188.3,104.9 189.7,105.8 191.1,106.8 192.6,107.8 194.0,108.7 195.4,109.7 196.9,110.7 198.3,111.7 199.8,112.6 201.2,113.6 202.6,114.6 204.1,115.6 205.5,116.6 206.9,117.6 208.4,118.6 209.8,119.6 211.2,120.6 212.7,121.6 214.1,122.6 215.5,123.6 217.0,124.5 218.4,125.5 219.8,126.5 221.3,127.4 222.7,128.4 224.1,129.4 225.6,130.3 227.0,131.3 228.4,132.2 229.9,133.1 231.3,134.0 232.7,135.0 234.2,135.9 235.6,136.8 237.0,137.7 238.5,138.5 239.9,139.4 241.3,140.3 242.8,141.1 244.2,142.0 245.6,142.8 247.1,143.7 248.5,144.5 249.9,145.3 251.4,146.1 252.8,146.9 254.2,147.7 255.7,148.5 257.1,149.2 258.5,150.0 260.0,150.7 261.4,151.5 262.9,152.2 264.3,152.9 265.7,153.6 267.2,154.3 268.6,155.0 270.0,155.7 271.5,156.4 272.9,157.1 274.3,157.7 275.8,158.4 277.2,159.0 278.6,159.6 280.1,160.3 281.5,160.9 282.9,161.5 284.4,162.1 285.8,162.7 287.2,163.3 288.7,163.8 290.1,164.4 291.5,164.9 293.0,165.5 294.4,166.0 295.8,166.6 295.8,200.0" fill="#0066cc" fill-opacity="0.18"/><polyline points="40.7,200.0 42.8,200.0 44.9,200.0 47.0,200.0 49.0,200.0 51.1,200.0 53.2,199.9 55.2,199.8 57.3,199.6 59.4,199.2 61.4,198.6 63.5,197.7 65.6,196.6 67.7,195.1 69.7,193.2 71.8,191.0 73.9,188.4 75.9,185.5 78.0,182.3 80.1,178.8 82.2,175.1 84.2,171.1 86.3,167.0 88.4,162.8 90.4,158.4 92.5,154.1 94.6,149.7 96.7,145.3 98.7,141.0 100.8,136.8 102.9,132.7 104.9,128.8 107.0,124.9 109.1,121.3 111.2,117.8 113.2,114.5 115.3,111.5 117.4,108.6 119.4,105.9 121.5,103.4 123.6,101.2 125.7,99.1 127.7,97.3 129.8,95.6 131.9,94.2 133.9,92.9 136.0,91.8 138.1,90.9 140.2,90.2 142.2,89.7 144.3,89.3 146.4,89.0 148.4,88.9 150.5,88.9 152.6,89.1 154.6,89.3 156.7,89.7 158.8,90.2 160.9,90.8 162.9,91.5 165.0,92.2 167.1,93.1 169.1,94.0 171.2,95.0 173.3,96.0 175.4,97.1 177.4,98.3 179.5,99.5 181.6,100.7 183.6,102.0 185.7,103.3 187.8,104.6 189.9,105.9 191.9,107.3 194.0,108.7 196.1,110.1 198.1,111.5 200.2,113.0 202.3,114.4 204.4,115.8 206.4,117.3 208.5,118.7 210.6,120.1 212.6,121.6 214.7,123.0 216.8,124.4 218.9,125.8 220.9,127.2 223.0,128.6 225.1,130.0 227.1,131.3 229.2,132.7 231.3,134.0 233.4,135.3 235.4,136.6 237.5,137.9 239.6,139.2 241.6,140.5 243.7,141.7 245.8,142.9 247.8,144.1 249.9,145.3 252.0,146.4 254.1,147.6 256.1,148.7 258.2,149.8 260.3,150.9 262.3,151.9 264.4,153.0 266.5,154.0 268.6,155.0 270.6,156.0 272.7,157.0 274.8,157.9 276.8,158.9 278.9,159.8 281.0,160.7 283.1,161.5 285.1,162.4 287.2,163.2 289.3,164.1 291.3,164.9 293.4,165.7 295.5,166.4 297.6,167.2 299.6,167.9 301.7,168.7 303.8,169.4 305.8,170.1 307.9,170.7 310.0,171.4 312.1,172.1 314.1,172.7 316.2,173.3 318.3,173.9 320.3,174.5 322.4,175.1 324.5,175.7 326.6,176.2 328.6,176.8 330.7,177.3 332.8,177.8 334.8,178.3 336.9,178.8 339.0,179.3 341.0,179.8 343.1,180.2 345.2,180.7 347.3,181.1 349.3,181.6 351.4,182.0 353.5,182.4 355.5,182.8 357.6,183.2 359.7,183.6 361.8,183.9 363.8,184.3 365.9,184.7 368.0,185.0 370.0,185.3 372.1,185.7 374.2,186.0 376.3,186.3 378.3,186.6 380.4,186.9 382.5,187.2 384.5,187.5 386.6,187.8 388.7,188.1 390.8,188.3 392.8,188.6 394.9,188.9 397.0,189.1 399.0,189.4 401.1,189.6 403.2,189.8 405.3,190.1 407.3,190.3 409.4,190.5 411.5,190.7 413.5,190.9 415.6,191.1 417.7,191.3 419.8,191.5 421.8,191.7 423.9,191.9 426.0,192.1 428.0,192.2 430.1,192.4 432.2,192.6 434.2,192.7 436.3,192.9 438.4,193.1 440.5,193.2 442.5,193.4 444.6,193.5 446.7,193.6 448.7,193.8 450.8,193.9 452.9,194.1 455.0,194.2 457.0,194.3 459.1,194.4 461.2,194.6 463.2,194.7 465.3,194.8 467.4,194.9 469.5,195.0 471.5,195.1 473.6,195.2 475.7,195.3 477.7,195.4 479.8,195.5 481.9,195.6 484.0,195.7 486.0,195.8 488.1,195.9 490.2,196.0 492.2,196.1 494.3,196.2 496.4,196.2 498.5,196.3 500.5,196.4 502.6,196.5 504.7,196.5 506.7,196.6 508.8,196.7 510.9,196.8 513.0,196.8 515.0,196.9 517.1,197.0 519.2,197.0 521.2,197.1 523.3,197.1 525.4,197.2 527.4,197.3 529.5,197.3 531.6,197.4 533.7,197.4 535.7,197.5 537.8,197.5 539.9,197.6 541.9,197.6 544.0,197.7 546.1,197.7 548.2,197.8 550.2,197.8 552.3,197.9 554.4,197.9 556.4,198.0 558.5,198.0 560.6,198.0 562.7,198.1 564.7,198.1 566.8,198.2 568.9,198.2 570.9,198.2 573.0,198.3 575.1,198.3 577.2,198.3 579.2,198.4 581.3,198.4 583.4,198.4 585.4,198.5 587.5,198.5 589.6,198.5 591.7,198.6 593.7,198.6 595.8,198.6 597.9,198.6 599.9,198.7 602.0,198.7 604.1,198.7 606.2,198.7 608.2,198.8 610.3,198.8 612.4,198.8 614.4,198.8 616.5,198.9 618.6,198.9 620.6,198.9 622.7,198.9 624.8,198.9 626.9,199.0 628.9,199.0 631.0,199.0 633.1,199.0 635.1,199.0 637.2,199.1 639.3,199.1 641.4,199.1 643.4,199.1 645.5,199.1 647.6,199.2 649.6,199.2 651.7,199.2 653.8,199.2 655.9,199.2 657.9,199.2 660.0,199.2" fill="none" stroke="#1a1a1a" stroke-width="1.8"/><line x1="125.2" y1="200.0" x2="125.2" y2="42.2" stroke="#0066cc" stroke-width="1.6" stroke-dasharray="5,3"/><line x1="295.8" y1="200.0" x2="295.8" y2="42.2" stroke="#0066cc" stroke-width="1.6" stroke-dasharray="5,3"/><line x1="187.6" y1="200.0" x2="187.6" y2="88.9" stroke="#d9730d" stroke-width="1.6"/><text paint-order="stroke" stroke="#fbfcfe" stroke-width="4" stroke-linejoin="round" x="193.6" y="161.1" font-size="12" fill="#d9730d">median</text><line x1="125.2" y1="42.2" x2="295.8" y2="42.2" stroke="#0066cc" stroke-width="3"/><text paint-order="stroke" stroke="#fbfcfe" stroke-width="4" stroke-linejoin="round" x="303.8" y="46.2" font-size="12" fill="#0066cc">p16 … p84: 68.27 %, −0.42 / +0.73</text><line x1="109.7" y1="67.5" x2="313.8" y2="67.5" stroke="#888888" stroke-width="3"/><circle cx="211.7" cy="67.5" r="3.5" fill="#888888"/><text paint-order="stroke" stroke="#fbfcfe" stroke-width="4" stroke-linejoin="round" x="321.8" y="71.5" font-size="12" fill="#888888">mean ± std: 78.3 %, symmetric ±0.69</text><line x1="40" y1="200.0" x2="660" y2="200.0" stroke="#1a1a1a" stroke-width="1"/><line x1="40.0" y1="200.0" x2="40.0" y2="205.0" stroke="#1a1a1a"/><text paint-order="stroke" stroke="#fbfcfe" stroke-width="4" stroke-linejoin="round" x="40.0" y="218.0" font-size="12" text-anchor="middle" fill="#1a1a1a">0</text><line x1="187.6" y1="200.0" x2="187.6" y2="205.0" stroke="#1a1a1a"/><text paint-order="stroke" stroke="#fbfcfe" stroke-width="4" stroke-linejoin="round" x="187.6" y="218.0" font-size="12" text-anchor="middle" fill="#1a1a1a">1</text><line x1="335.2" y1="200.0" x2="335.2" y2="205.0" stroke="#1a1a1a"/><text paint-order="stroke" stroke="#fbfcfe" stroke-width="4" stroke-linejoin="round" x="335.2" y="218.0" font-size="12" text-anchor="middle" fill="#1a1a1a">2</text><line x1="482.9" y1="200.0" x2="482.9" y2="205.0" stroke="#1a1a1a"/><text paint-order="stroke" stroke="#fbfcfe" stroke-width="4" stroke-linejoin="round" x="482.9" y="218.0" font-size="12" text-anchor="middle" fill="#1a1a1a">3</text><line x1="630.5" y1="200.0" x2="630.5" y2="205.0" stroke="#1a1a1a"/><text paint-order="stroke" stroke="#fbfcfe" stroke-width="4" stroke-linejoin="round" x="630.5" y="218.0" font-size="12" text-anchor="middle" fill="#1a1a1a">4</text><text paint-order="stroke" stroke="#fbfcfe" stroke-width="4" stroke-linejoin="round" x="350.0" y="242" font-size="12" text-anchor="middle" fill="#888888">Skewed distribution: the percentile interval keeps 68.27 % and the asymmetry; mean ± std does not</text></svg>
+<figcaption>Figure 2. A skewed distribution (log-normal). The percentile
+interval (blue) still holds 68.27 % and is asymmetric: −0.42 / +0.73
+about the median. Mean ± standard deviation (grey) is symmetric (±0.69)
+about a different centre and holds 78.3 % instead.</figcaption></figure>
+<p><strong>2. Asymmetry is kept.</strong> The lower half-width p50 − p16 and
+the upper half-width p84 − p50 are separate numbers, which is why CalEnEff
+reports +upper / −lower. Efficiency is a non-linear function of the fit
+parameters, so its distribution can be lopsided — mostly towards the ends of
+the calibrated range and beyond them, where upper/lower ratios from 0.16 to
+13.7 were measured.</p>
+<p><strong>3. Robust to a few bad refits.</strong> A handful of Monte Carlo
+refits that run away can inflate the standard deviation enormously while
+barely moving the percentiles.</p>
+<figure class="fig"><svg viewBox="0 0 680 250" role="img" aria-label="Histogram with a few runaway samples: standard deviation versus percentile width" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI, Helvetica, Arial, sans-serif"><rect x="148.5" y="199.9" width="7.1" height="0.1" fill="#888888" fill-opacity="0.45"/><rect x="179.5" y="199.9" width="7.2" height="0.1" fill="#888888" fill-opacity="0.45"/><rect x="202.8" y="199.9" width="7.2" height="0.1" fill="#888888" fill-opacity="0.45"/><rect x="210.5" y="199.5" width="7.2" height="0.5" fill="#888888" fill-opacity="0.45"/><rect x="218.3" y="199.6" width="7.2" height="0.4" fill="#888888" fill-opacity="0.45"/><rect x="226.0" y="199.0" width="7.1" height="1.0" fill="#888888" fill-opacity="0.45"/><rect x="233.8" y="198.7" width="7.2" height="1.3" fill="#888888" fill-opacity="0.45"/><rect x="241.5" y="198.1" width="7.2" height="1.9" fill="#888888" fill-opacity="0.45"/><rect x="249.2" y="195.2" width="7.2" height="4.8" fill="#888888" fill-opacity="0.45"/><rect x="257.0" y="193.0" width="7.2" height="7.0" fill="#888888" fill-opacity="0.45"/><rect x="264.8" y="187.3" width="7.2" height="12.7" fill="#888888" fill-opacity="0.45"/><rect x="272.5" y="184.9" width="7.2" height="15.1" fill="#888888" fill-opacity="0.45"/><rect x="280.2" y="176.5" width="7.2" height="23.5" fill="#888888" fill-opacity="0.45"/><rect x="288.0" y="166.8" width="7.2" height="33.2" fill="#888888" fill-opacity="0.45"/><rect x="295.8" y="157.1" width="7.2" height="42.9" fill="#888888" fill-opacity="0.45"/><rect x="303.5" y="142.3" width="7.2" height="57.7" fill="#888888" fill-opacity="0.45"/><rect x="311.2" y="135.1" width="7.2" height="64.9" fill="#888888" fill-opacity="0.45"/><rect x="319.0" y="122.9" width="7.2" height="77.1" fill="#888888" fill-opacity="0.45"/><rect x="326.8" y="115.7" width="7.2" height="84.3" fill="#888888" fill-opacity="0.45"/><rect x="334.5" y="98.5" width="7.2" height="101.5" fill="#888888" fill-opacity="0.45"/><rect x="342.2" y="101.9" width="7.2" height="98.1" fill="#888888" fill-opacity="0.45"/><rect x="350.0" y="97.1" width="7.2" height="102.9" fill="#888888" fill-opacity="0.45"/><rect x="357.8" y="106.0" width="7.1" height="94.0" fill="#888888" fill-opacity="0.45"/><rect x="365.5" y="117.3" width="7.2" height="82.7" fill="#888888" fill-opacity="0.45"/><rect x="373.2" y="122.7" width="7.2" height="77.3" fill="#888888" fill-opacity="0.45"/><rect x="381.0" y="134.1" width="7.2" height="65.9" fill="#888888" fill-opacity="0.45"/><rect x="388.8" y="143.3" width="7.2" height="56.7" fill="#888888" fill-opacity="0.45"/><rect x="396.5" y="160.9" width="7.1" height="39.1" fill="#888888" fill-opacity="0.45"/><rect x="404.2" y="168.1" width="7.2" height="31.9" fill="#888888" fill-opacity="0.45"/><rect x="412.0" y="179.1" width="7.1" height="20.9" fill="#888888" fill-opacity="0.45"/><rect x="419.8" y="184.2" width="7.2" height="15.8" fill="#888888" fill-opacity="0.45"/><rect x="427.5" y="189.1" width="7.2" height="10.9" fill="#888888" fill-opacity="0.45"/><rect x="435.3" y="192.3" width="7.1" height="7.7" fill="#888888" fill-opacity="0.45"/><rect x="443.0" y="196.0" width="7.2" height="4.0" fill="#888888" fill-opacity="0.45"/><rect x="450.8" y="197.6" width="7.1" height="2.4" fill="#888888" fill-opacity="0.45"/><rect x="458.5" y="198.6" width="7.2" height="1.4" fill="#888888" fill-opacity="0.45"/><rect x="466.2" y="199.4" width="7.2" height="0.6" fill="#888888" fill-opacity="0.45"/><rect x="474.0" y="199.6" width="7.1" height="0.4" fill="#888888" fill-opacity="0.45"/><rect x="481.8" y="199.9" width="7.2" height="0.1" fill="#888888" fill-opacity="0.45"/><rect x="489.5" y="199.7" width="7.1" height="0.3" fill="#888888" fill-opacity="0.45"/><rect x="505.0" y="199.9" width="7.2" height="0.1" fill="#888888" fill-opacity="0.45"/><rect x="520.5" y="199.9" width="7.2" height="0.1" fill="#888888" fill-opacity="0.45"/><rect x="559.2" y="199.9" width="7.2" height="0.1" fill="#888888" fill-opacity="0.45"/><rect x="567.0" y="199.9" width="7.2" height="0.1" fill="#888888" fill-opacity="0.45"/><rect x="582.5" y="199.9" width="7.2" height="0.1" fill="#888888" fill-opacity="0.45"/><rect x="613.5" y="199.9" width="7.2" height="0.1" fill="#888888" fill-opacity="0.45"/><rect x="621.2" y="199.7" width="7.2" height="0.3" fill="#888888" fill-opacity="0.45"/><line x1="310.4" y1="40.6" x2="388.8" y2="40.6" stroke="#0066cc" stroke-width="3"/><text paint-order="stroke" stroke="#fbfcfe" stroke-width="4" stroke-linejoin="round" x="396.8" y="44.6" font-size="12" fill="#0066cc">σ₆₈ from percentiles = 1.01</text><line x1="229.0" y1="71.4" x2="471.0" y2="71.4" stroke="#d9730d" stroke-width="3"/><text paint-order="stroke" stroke="#fbfcfe" stroke-width="4" stroke-linejoin="round" x="479.0" y="75.4" font-size="12" fill="#d9730d">standard deviation = 3.12</text><text paint-order="stroke" stroke="#fbfcfe" stroke-width="4" stroke-linejoin="round" x="656" y="135.2" font-size="11" text-anchor="end" fill="#888888">+ 84 runaway samples</text><text paint-order="stroke" stroke="#fbfcfe" stroke-width="4" stroke-linejoin="round" x="656" y="149.2" font-size="11" text-anchor="end" fill="#888888">beyond the frame</text><line x1="40" y1="200.0" x2="660" y2="200.0" stroke="#1a1a1a" stroke-width="1"/><line x1="117.5" y1="200.0" x2="117.5" y2="205.0" stroke="#1a1a1a"/><text paint-order="stroke" stroke="#fbfcfe" stroke-width="4" stroke-linejoin="round" x="117.5" y="218.0" font-size="12" text-anchor="middle" fill="#1a1a1a">−6</text><line x1="195.0" y1="200.0" x2="195.0" y2="205.0" stroke="#1a1a1a"/><text paint-order="stroke" stroke="#fbfcfe" stroke-width="4" stroke-linejoin="round" x="195.0" y="218.0" font-size="12" text-anchor="middle" fill="#1a1a1a">−4</text><line x1="272.5" y1="200.0" x2="272.5" y2="205.0" stroke="#1a1a1a"/><text paint-order="stroke" stroke="#fbfcfe" stroke-width="4" stroke-linejoin="round" x="272.5" y="218.0" font-size="12" text-anchor="middle" fill="#1a1a1a">−2</text><line x1="350.0" y1="200.0" x2="350.0" y2="205.0" stroke="#1a1a1a"/><text paint-order="stroke" stroke="#fbfcfe" stroke-width="4" stroke-linejoin="round" x="350.0" y="218.0" font-size="12" text-anchor="middle" fill="#1a1a1a">0</text><line x1="427.5" y1="200.0" x2="427.5" y2="205.0" stroke="#1a1a1a"/><text paint-order="stroke" stroke="#fbfcfe" stroke-width="4" stroke-linejoin="round" x="427.5" y="218.0" font-size="12" text-anchor="middle" fill="#1a1a1a">2</text><line x1="505.0" y1="200.0" x2="505.0" y2="205.0" stroke="#1a1a1a"/><text paint-order="stroke" stroke="#fbfcfe" stroke-width="4" stroke-linejoin="round" x="505.0" y="218.0" font-size="12" text-anchor="middle" fill="#1a1a1a">4</text><line x1="582.5" y1="200.0" x2="582.5" y2="205.0" stroke="#1a1a1a"/><text paint-order="stroke" stroke="#fbfcfe" stroke-width="4" stroke-linejoin="round" x="582.5" y="218.0" font-size="12" text-anchor="middle" fill="#1a1a1a">6</text><text paint-order="stroke" stroke="#fbfcfe" stroke-width="4" stroke-linejoin="round" x="350.0" y="242" font-size="12" text-anchor="middle" fill="#888888">10 000 samples, 1 % of them runaway: the standard deviation follows the outliers, σ₆₈ does not</text></svg>
+<figcaption>Figure 3. 10 000 samples, 1 % of them runaway. The standard
+deviation (orange, 3.12) is dragged out by the few outliers — 3.1× the
+percentile width σ₆₈ (blue, 1.01), which still describes the bulk of the
+distribution. Just beyond the calibration lines, CalEnEff's own Monte Carlo
+showed the standard deviation at up to 4.8× σ₆₈ for this reason.</figcaption></figure>
+<p><strong>4. Unchanged by monotonic transformations.</strong> Percentiles
+pass through any monotonic function: the 84th percentile of ε is the
+exponential of the 84th percentile of ln ε, and the same holds for energy
+versus channel. A standard deviation does not, so a std-based interval
+depends on which variable it happens to be computed in; a percentile
+interval does not.</p>
+<p><strong>5. One set of statistics for everything.</strong> The 50 % point
+is the median used by the bias check, and the same three percentiles build
+the band, the query and the export. Value, interval and check therefore all
+come from one consistent set of numbers.</p>
+
+<h3>How CalEnEff turns them into the reported 1σ</h3>
+<div class='formula'>lower 1σ = B · (p50 − p16)
+upper 1σ = B · (p84 − p50)
+σ        = B · (p84 − p16) / 2        (symmetric summary; the export's Δε)</div>
+<p>with B the model's Birge ratio, taken as 1 when it is below 1. The
+interval is placed around the best fit, not around the median, so a small
+offset between the two cannot move it (see the section above).</p>
+
+<h3>The price</h3>
+<p>From the same number of samples N, a width taken from percentiles is
+noisier than a standard deviation. For a Gaussian the relative uncertainty
+of σ₆₈ is about <span class="nb">0.96/<span class="sqrt"><span class="rs">√</span><span class="rad">N</span></span></span>, against <span class="nb">0.71/<span class="sqrt"><span class="rs">√</span><span class="rad">N</span></span></span> for the standard deviation.
+With N = 10 000 that is about 1.0 % against 0.7 % — negligible next to the
+rest of the uncertainty budget (the Birge factor alone is about 5 on the
+bundled data).</p>
+<div class='note'><strong>Energy queries</strong> still take their 1σ from
+the standard deviation (the calibration share Birge-inflated, your Δch₀
+added). That is harmless there: the channel-to-energy inversion is close to
+linear and its distribution Gaussian, so the two widths agree, and the MC
+median and mean differ by 0.0003 keV at channel 2000.</div>
 
 <p>Reference: Tellinghuisen, J., "Statistical Error Propagation,"
 <em>J. Phys. Chem. A</em> 105 (2001) 3917–3921.</p>
