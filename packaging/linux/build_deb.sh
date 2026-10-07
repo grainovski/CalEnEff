@@ -113,6 +113,23 @@ chmod 755 "$STAGING/usr/bin/caleneff"
 cat > /tmp/changelog <<EOF
 caleneff (${VER}) stable; urgency=low
 
+  * Radware is fitted to rescaled efficiencies, so its result no longer
+    depends on the units of eps (eps ~ 1 used to move eps(843) by 10 %).
+  * A non-positive N or I in the Monte Carlo is redrawn on its own instead
+    of discarding the whole replicate.
+  * Optional 8th input column: reference-energy uncertainty, used by
+    effective variance in the energy fit.
+  * Results file gains NOTES (KRF-Radware model spread, systematic Birge
+    ratios, missing or zero-dof models); queries log the model difference.
+    Energy queries report the best fit, with the MC mean as a check.
+  * Calibration 1.5x faster, band memory 320 -> 40 MB, export 3x faster.
+    Calculations moved to caleneff_engine.py. HowTo rewritten to describe
+    the actual program.
+
+ -- grainovski <grainovski@googlemail.com>  $(date -R)
+
+caleneff (4.9) stable; urgency=low
+
   * Radware Monte Carlo fixed: each refit started from a fresh parset() seed
     and, on the example data, converged to a worse local minimum, so the
     Radware band and query described a different curve from the one drawn
@@ -126,7 +143,7 @@ caleneff (${VER}) stable; urgency=low
   * Export header lists the Radware best fit (it listed the mean of the
     Monte Carlo parameter sets) and the bias check.
 
- -- grainovski <grainovski@googlemail.com>  $(date -R)
+ -- grainovski <grainovski@googlemail.com>  Tue, 06 Oct 2026 20:30:00 +0300
 
 caleneff (4.8) stable; urgency=low
 

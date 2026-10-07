@@ -1,7 +1,7 @@
 # Version is supplied by build_rpm.sh via --define "version X.Y", which reads
 # it from Ra226_Calibration.iss so the whole project has one source of truth.
 # The fallback below only applies when rpmbuild is invoked by hand.
-%{!?version: %define version 4.9}
+%{!?version: %define version 4.10}
 
 Name:           caleneff
 Version:        %{version}
@@ -149,6 +149,20 @@ if [ "$1" = "0" ]; then
 fi
 
 %changelog
+* Wed Oct 07 2026 grainovski <grainovski@googlemail.com> - 4.10-1
+- Radware is fitted to rescaled efficiencies, so its result no longer
+  depends on the units of eps (eps ~ 1 used to move eps(843) by 10 %%).
+- A non-positive N or I in the Monte Carlo is redrawn on its own instead of
+  discarding the whole replicate.
+- Optional 8th input column: reference-energy uncertainty, used by effective
+  variance in the energy fit.
+- Results file gains NOTES (KRF-Radware model spread, systematic Birge
+  ratios, missing or zero-dof models); queries log the model difference.
+  Energy queries report the best fit, with the MC mean as a check.
+- Calibration 1.5x faster, band memory 320 -> 40 MB, export 3x faster.
+  Calculations moved to caleneff_engine.py. HowTo rewritten to describe the
+  actual program.
+
 * Tue Oct 06 2026 grainovski <grainovski@googlemail.com> - 4.9-1
 - Radware Monte Carlo fixed: each refit started from a fresh parset() seed
   and, on the example data, converged to a worse local minimum, so the
